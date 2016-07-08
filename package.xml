@@ -1,8 +1,8 @@
 <package>
-  <name>pointcloud_filter</name>
+  <name>pointcloud_utils</name>
   <version>1.0.0</version>
   <description>
-    This package contains planners implementation for Velma robot.
+    This package contains (TODO).
   </description>
   <author email="dawid.seredynski@gmail.com">Dawid Seredynski</author>
   <maintainer email="dawid.seredynski@gmail.com">Dawid Seredynski</maintainer>
@@ -23,6 +23,7 @@
   <build_depend>interactive_markers</build_depend>
   <build_depend>barrett_hand_controller_msgs</build_depend>
   <build_depend>kdl_conversions</build_depend>
+  <build_depend>pointcloud_utils_msgs</build_depend>
 
   <run_depend>rtt</run_depend>
   <run_depend>rtt_ros</run_depend>
@@ -41,5 +42,6 @@
   <run_depend>interactive_markers</run_depend>
   <run_depend>barrett_hand_controller_msgs</run_depend>
   <run_depend>kdl_conversions</run_depend>
+  <run_depend>pointcloud_utils_msgs</run_depend>
 
 </package>

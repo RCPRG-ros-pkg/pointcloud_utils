@@ -1,0 +1,8 @@
+<?xml version="1.0"?>
+<launch>
+    <node pkg="pointcloud_utils" type="find_features_pc" name="find_features_pc" output="screen">
+      <param name="tolerance" value="0.1" type="double" />
+      <remap from="cloud_in" to="/head_kinect/depth/points"/>
+    </node>
+</launch>
+
