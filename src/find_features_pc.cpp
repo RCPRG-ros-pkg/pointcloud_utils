@@ -260,8 +260,10 @@ bool findPlanes(pointcloud_utils_msgs::FindPlanes::Request  &req,
     double c_r = (double)(rand()%1000) / 1000.0;
     double c_g = (double)(rand()%1000) / 1000.0;
     double c_b = (double)(rand()%1000) / 1000.0;
-    for (int i = 0; i < 500; i++) {
-        int ptidx = rand()%size;
+//    for (int i = 0; i < 500; i++) {
+//        int ptidx = rand()%size;
+    for (int i = 0; i < size; i+=2) {
+        int ptidx = i;
         m_id = pcf->mp_.addSinglePointMarker(m_id, KDL::Vector(cloud_p->points[ptidx].x, cloud_p->points[ptidx].y, cloud_p->points[ptidx].z), c_r, c_g, c_b, 1, 0.01, pcf->pc_frame_id_);
     }
 
