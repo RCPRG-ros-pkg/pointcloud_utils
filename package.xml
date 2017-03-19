@@ -19,7 +19,6 @@
   <build_depend>octomap</build_depend>
   <build_depend>octomap_msgs</build_depend>
   <build_depend>collision_convex_model</build_depend>
-  <build_depend>ompl</build_depend>
   <build_depend>interactive_markers</build_depend>
   <build_depend>barrett_hand_controller_msgs</build_depend>
   <build_depend>kdl_conversions</build_depend>
@@ -38,7 +37,6 @@
   <run_depend>message_runtime</run_depend>
   <run_depend>rtt_std_msgs</run_depend>
   <run_depend>collision_convex_model</run_depend>
-  <run_depend>ompl</run_depend>
   <run_depend>interactive_markers</run_depend>
   <run_depend>barrett_hand_controller_msgs</run_depend>
   <run_depend>kdl_conversions</run_depend>
