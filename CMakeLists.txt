@@ -3,7 +3,7 @@ project(pointcloud_utils)
 
 find_package(catkin REQUIRED COMPONENTS
     rtt_ros rtt_rosclock std_msgs interactive_markers tf pcl_ros pcl_conversions eigen_conversions cmake_modules collision_convex_model
- octomap_msgs barrett_hand_controller_msgs kdl_conversions pointcloud_utils_msgs planer_utils
+ octomap_msgs kdl_conversions pointcloud_utils_msgs planer_utils
   )
 
 find_package(Eigen3 REQUIRED)
