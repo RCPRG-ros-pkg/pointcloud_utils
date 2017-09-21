@@ -68,7 +68,7 @@
 #include <pcl/segmentation/extract_clusters.h>
 */
 #include <collision_convex_model/collision_convex_model.h>
-#include <kin_model/kin_model.h>
+#include <kin_dyn_model/kin_model.h>
 
 double uniform(double min, double max) {
     return double(rand())/RAND_MAX*(max-min) + min;
