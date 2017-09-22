@@ -14,6 +14,10 @@ find_package(orocos_kdl REQUIRED)
 find_package(DARTCore REQUIRED)
 #find_package(dart REQUIRED)
 
+catkin_package(
+    CATKIN_DEPENDS collision_convex_model
+)
+
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++11")
 
 link_directories(${orocos_kdl_LIBRARY_DIRS})
@@ -32,7 +36,13 @@ target_link_libraries(sim_visible_pointcloud ${catkin_LIBRARIES}
 )
 target_link_libraries(test_nn ${catkin_LIBRARIES})
 
-catkin_package(
-    CATKIN_DEPENDS collision_convex_model
+install(TARGETS find_features_pc pc_filter sim_visible_pointcloud test_nn
+  ARCHIVE DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
+  LIBRARY DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
+  RUNTIME DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 )
+
+install(DIRECTORY launch/
+  DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION}/launch
+  )
 
