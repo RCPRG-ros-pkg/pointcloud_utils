@@ -60,9 +60,20 @@
 
 #include <collision_convex_model/collision_convex_model.h>
 
-class PCFilter {
+#include <octomap_msgs/Octomap.h>
+#include <octomap_msgs/GetOctomap.h>
+#include <octomap_msgs/BoundingBoxQuery.h>
+#include <octomap_msgs/conversions.h>
+
+#include <octomap_ros/conversions.h>
+#include <octomap/octomap.h>
+#include <octomap/OcTreeKey.h>
+
+using octomap_msgs::Octomap;
+
+class OctomapFilter {
     ros::NodeHandle nh_;
-    bool point_cloud_processed_;
+/*    bool point_cloud_processed_;
     double tolerance_;
 
     tf::TransformListener tf_listener_;
@@ -74,53 +85,62 @@ class PCFilter {
     PclPointCloud pc_;
     ros::Time pc_stamp_;
     std::string pc_frame_id_;
+*/
 
+    boost::shared_ptr<octomap::AbstractOcTree> m_octree;
+
+    ros::Subscriber m_fullMapSub;
+    ros::Publisher  m_binaryMapPub;
 public:
 
-    void insertCloudCallback(const sensor_msgs::PointCloud2::ConstPtr& cloud){
-        if (point_cloud_processed_) {
-            point_cloud_processed_ = false;
-            sensor_msgs::PointCloud2 resized;
-            resized.header = cloud->header;
-            resized.height = cloud->height/2;
-            resized.width = cloud->width/2;
-            resized.fields = cloud->fields;
-            resized.is_bigendian = cloud->is_bigendian;
-            resized.point_step = cloud->point_step;
-            resized.row_step = cloud->row_step/2;
-            resized.is_dense = cloud->is_dense;
-            resized.data.resize(resized.height * resized.row_step);
-            for (int y = 0; y < cloud->height; y += 2) {
-                for (int x = 0; x < cloud->width; x += 2) {
-                    for (int i = 0; i < cloud->point_step; ++i) {
-                        resized.data[int(y/2)*resized.row_step + int(x/2)*resized.point_step + i] = cloud->data[y*cloud->row_step + x*cloud->point_step + i];
-                    }
-                }
-            }
-
-            pcl::fromROSMsg(resized, pc_);
-            pc_stamp_ = cloud->header.stamp;
-            pc_frame_id_ = cloud->header.frame_id;
-        }
+    void callback(const Octomap& map)
+    {
+        m_octree.reset(octomap_msgs::fullMsgToMap(map));
+        publishAll(map.header.stamp, map.header.frame_id);
     }
 
-    PCFilter() :
-        nh_(),
-        point_cloud_processed_(true),
-        tolerance_(0.04)
+    OctomapFilter()
+        : nh_()
     {
-        m_pointCloudSub = new message_filters::Subscriber<sensor_msgs::PointCloud2> (nh_, "cloud_in", 5);
+        m_fullMapSub = nh_.subscribe("octomap_full", 1, &OctomapFilter::callback, this);
+        m_binaryMapPub = nh_.advertise<Octomap>("octomap_binary", 1, true);
+
+/*        m_pointCloudSub = new message_filters::Subscriber<sensor_msgs::PointCloud2> (nh_, "cloud_in", 5);
         m_tfPointCloudSub = new tf::MessageFilter<sensor_msgs::PointCloud2> (*m_pointCloudSub, tf_listener_, "world", 5);
-        m_tfPointCloudSub->registerCallback(boost::bind(&PCFilter::insertCloudCallback, this, _1));
+        m_tfPointCloudSub->registerCallback(boost::bind(&OctomapFilter::insertCloudCallback, this, _1));
 
         pub_pc_ = nh_.advertise<sensor_msgs::PointCloud2 >("cloud_out", 10);
+
+
+
+  Octomap map;
+  map.header.frame_id = m_worldFrameId;
+  map.header.stamp = rostime;
+
+  if (octomap_msgs::fullMapToMsg(*m_octree, map))
+    m_fullMapPub.publish(map);
+  else
+    ROS_ERROR("Error serializing OctoMap");
+*/
     }
 
-    ~PCFilter() {
+    ~OctomapFilter() {
+    }
+
+    void publishAll(const ros::Time& rostime, const std::string& frame_id) {
+        Octomap map;
+        map.header.frame_id = frame_id;
+        map.header.stamp = rostime;
+
+        if (octomap_msgs::binaryMapToMsg(*boost::dynamic_pointer_cast<octomap::OcTree >(m_octree), map))
+            m_binaryMapPub.publish(map);
+        else
+            ROS_ERROR("Error serializing OctoMap");
     }
 
     void spin() {
 
+/*
         std::string robot_description_str;
         nh_.getParam("/robot_description", robot_description_str);
 
@@ -157,6 +177,7 @@ public:
                 tf::transformMsgToKDL(tfm_W_C.transform, T_W_C);
 
                 std::vector<KDL::Frame > links_tf(col_model->getLinksCount());
+                std::set<std::string > colliding_links;
                 std::vector<bool > pt_col(pc_.points.size(), false);
                 bool tf_error = false;
                 for (int l_idx = 0; l_idx < col_model->getLinksCount(); l_idx++) {
@@ -186,6 +207,7 @@ public:
                         KDL::Frame T_C_P(KDL::Vector(pc_.points[pidx].x, pc_.points[pidx].y, pc_.points[pidx].z));
                         if (self_collision::checkCollision(shpere, T_C_P, plink, T_C_L)) {
                             pt_col[pidx] = true;
+                            colliding_links.insert( plink->name );
                         }
                     }
                 }
@@ -213,13 +235,14 @@ public:
 
             }
         }
+*/
     }
 };
 
 int main(int argc, char** argv) {
-    ros::init(argc, argv, "pc_filter");
-    PCFilter pcf;
-    pcf.spin();
+    ros::init(argc, argv, "octomap_filter");
+    OctomapFilter of;
+    of.spin();
     return 0;
 }
 
