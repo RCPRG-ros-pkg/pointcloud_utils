@@ -87,15 +87,19 @@ class OctomapFilter {
     std::string pc_frame_id_;
 */
 
-    boost::shared_ptr<octomap::AbstractOcTree> m_octree;
+    boost::shared_ptr<octomap::OcTree> m_octree;
+    boost::shared_ptr<octomap::OcTree> m_unknowntree;
+
+    std_msgs::ColorRGBA m_color;
 
     ros::Subscriber m_fullMapSub;
-    ros::Publisher  m_binaryMapPub;
+//    ros::Publisher  m_binaryMapPub;
+    ros::Publisher  m_binaryUnknownMapPub, m_markerPub;
 public:
 
     void callback(const Octomap& map)
     {
-        m_octree.reset(octomap_msgs::fullMsgToMap(map));
+        m_octree.reset(dynamic_cast<octomap::OcTree*>(octomap_msgs::fullMsgToMap(map)));
         publishAll(map.header.stamp, map.header.frame_id);
     }
 
@@ -103,139 +107,143 @@ public:
         : nh_()
     {
         m_fullMapSub = nh_.subscribe("octomap_full", 1, &OctomapFilter::callback, this);
-        m_binaryMapPub = nh_.advertise<Octomap>("octomap_binary", 1, true);
-
-/*        m_pointCloudSub = new message_filters::Subscriber<sensor_msgs::PointCloud2> (nh_, "cloud_in", 5);
-        m_tfPointCloudSub = new tf::MessageFilter<sensor_msgs::PointCloud2> (*m_pointCloudSub, tf_listener_, "world", 5);
-        m_tfPointCloudSub->registerCallback(boost::bind(&OctomapFilter::insertCloudCallback, this, _1));
-
-        pub_pc_ = nh_.advertise<sensor_msgs::PointCloud2 >("cloud_out", 10);
-
-
-
-  Octomap map;
-  map.header.frame_id = m_worldFrameId;
-  map.header.stamp = rostime;
-
-  if (octomap_msgs::fullMapToMsg(*m_octree, map))
-    m_fullMapPub.publish(map);
-  else
-    ROS_ERROR("Error serializing OctoMap");
+        m_binaryUnknownMapPub = nh_.advertise<Octomap>("octomap_unknown_binary", 1, true);
+        m_markerPub = nh_.advertise<visualization_msgs::MarkerArray>("unknown_cells_vis_array", 1, true);
+/*
+        m_unknowntree.reset(new octomap::OcTree(0.025));
+        m_unknowntree->updateNode(octomath::Vector3(-3,-3,-3), true, true);
+        m_unknowntree->updateNode(octomath::Vector3(-3,-3,3), true, true);
+        m_unknowntree->updateNode(octomath::Vector3(-3,3,-3), true, true);
+        m_unknowntree->updateNode(octomath::Vector3(-3,3,3), true, true);
+        m_unknowntree->updateNode(octomath::Vector3(3,-3,-3), true, true);
+        m_unknowntree->updateNode(octomath::Vector3(3,-3,3), true, true);
+        m_unknowntree->updateNode(octomath::Vector3(3,3,-3), true, true);
+        m_unknowntree->updateNode(octomath::Vector3(3,3,3), true, true);
+        m_unknowntree->updateInnerOccupancy();
+        std::cout << "writing octomap to .ot file" << std::endl;
+        if (!m_unknowntree->write("/home/dseredyn/ws_stero/map.ot")) {
+            std::cout << "error" << std::endl;
+        }
+        std::cout << "done" << std::endl;
 */
+
+        m_unknowntree.reset(new octomap::OcTree(0.1));
+        for (double z = 0.0; z < 2.0; z += 0.05) {
+            for (double y = -1.8; y < 1.8; y += 0.05) {
+                for (double x = -1.8; x < 1.8; x += 0.05) {
+                    m_unknowntree->updateNode(octomath::Vector3(x,y,z), true, true);
+                }
+            }
+        }
+
+        m_unknowntree->updateInnerOccupancy();
     }
 
     ~OctomapFilter() {
     }
 
     void publishAll(const ros::Time& rostime, const std::string& frame_id) {
-        Octomap map;
-        map.header.frame_id = frame_id;
-        map.header.stamp = rostime;
+  m_color.r = 0;
+  m_color.g = 1;
+  m_color.b = 0;
+  m_color.a = 1;
 
-        if (octomap_msgs::binaryMapToMsg(*boost::dynamic_pointer_cast<octomap::OcTree >(m_octree), map))
-            m_binaryMapPub.publish(map);
+  int m_treeDepth = m_octree->getTreeDepth();
+  int m_maxTreeDepth = m_treeDepth;
+
+  // init markers:
+  visualization_msgs::MarkerArray occupiedNodesVis;
+  // each array stores all cubes of a different size, one for each depth level:
+  occupiedNodesVis.markers.resize(m_treeDepth+1);
+
+
+    for (double z = -2.0; z < 2.0; z += 0.05) {
+        for (double y = -2.0; y < 2.0; y += 0.05) {
+            for (double x = -2.0; x < 2.0; x += 0.05) {
+                octomap::OcTreeNode *node = m_octree->search(octomath::Vector3(x,y,z));
+                if (node) {
+                    m_unknowntree->updateNode(octomath::Vector3(x,y,z), false, true);
+                }
+            }
+        }
+    }
+
+//    for (octomap::OcTree::leaf_bbx_iterator it = m_octree->begin_leafs_bbx(octomath::Vector3(-2,-2,-2), octomath::Vector3(2,2,2)),
+//        end = m_octree->end_leafs_bbx(); it != end; ++it)
+/*    for (octomap::OcTree::iterator it = m_octree->begin(),//octomath::Vector3(-2,-2,-2), octomath::Vector3(2,2,2)),
+        end = m_octree->end(); it != end; ++it)
+    {
+//        if (m_unknowntree->isNodeOccupied(*it)){
+        m_unknowntree->updateNode(it.getCoordinate(), false, true);
+    }
+*/
+    m_unknowntree->updateInnerOccupancy();
+
+    m_unknowntree->prune();
+
+  // now, traverse all leafs in the tree:
+  for (octomap::OcTree::iterator it = m_unknowntree->begin(m_maxTreeDepth),
+      end = m_unknowntree->end(); it != end; ++it)
+  {
+    if (m_unknowntree->isNodeOccupied(*it)){
+        double z = it.getZ();
+        double size = it.getSize();
+        double x = it.getX();
+        double y = it.getY();
+
+
+        //create marker:
+          unsigned idx = it.getDepth();
+          assert(idx < occupiedNodesVis.markers.size());
+
+          geometry_msgs::Point cubeCenter;
+          cubeCenter.x = x;
+          cubeCenter.y = y;
+          cubeCenter.z = z;
+
+          occupiedNodesVis.markers[idx].points.push_back(cubeCenter);
+    }
+  }
+
+
+
+    for (unsigned i= 0; i < occupiedNodesVis.markers.size(); ++i){
+      double size = m_unknowntree->getNodeSize(i);
+
+      occupiedNodesVis.markers[i].header.frame_id = frame_id;
+      occupiedNodesVis.markers[i].header.stamp = rostime;
+      occupiedNodesVis.markers[i].ns = "map";
+      occupiedNodesVis.markers[i].id = i;
+      occupiedNodesVis.markers[i].type = visualization_msgs::Marker::CUBE_LIST;
+      occupiedNodesVis.markers[i].scale.x = size;
+      occupiedNodesVis.markers[i].scale.y = size;
+      occupiedNodesVis.markers[i].scale.z = size;
+      occupiedNodesVis.markers[i].color = m_color;
+
+
+      if (occupiedNodesVis.markers[i].points.size() > 0)
+        occupiedNodesVis.markers[i].action = visualization_msgs::Marker::ADD;
+      else
+        occupiedNodesVis.markers[i].action = visualization_msgs::Marker::DELETE;
+    }
+
+    m_markerPub.publish(occupiedNodesVis);
+
+
+
+
+        Octomap map2;
+        map2.header.frame_id = frame_id;
+        map2.header.stamp = rostime;
+
+        if (octomap_msgs::binaryMapToMsg(*boost::dynamic_pointer_cast<octomap::OcTree >(m_unknowntree), map2))
+            m_binaryUnknownMapPub.publish(map2);
         else
             ROS_ERROR("Error serializing OctoMap");
     }
 
     void spin() {
-
-/*
-        std::string robot_description_str;
-        nh_.getParam("/robot_description", robot_description_str);
-
-        //
-        // collision model
-        //
-        boost::shared_ptr<self_collision::CollisionModel> col_model = self_collision::CollisionModel::parseURDF(robot_description_str);
-
-        boost::shared_ptr< self_collision::Collision > shpere = self_collision::createCollisionSphere(tolerance_, KDL::Frame());
-
-        ros::Rate loop_rate(5);
-        int errors = 0;
-        while (ros::ok()) {
-            ros::spinOnce();
-            loop_rate.sleep();
-
-            if (errors > 5) {
-                point_cloud_processed_ = true;
-            }
-
-            if (!point_cloud_processed_) {
-
-                tf::StampedTransform tf_W_C;
-                try {
-                    tf_listener_.lookupTransform("world", pc_frame_id_, pc_stamp_, tf_W_C);
-                } catch(tf::TransformException& ex){
-                    ROS_ERROR_STREAM( "Transform error of sensor data: " << ex.what() << ", quitting callback");
-                    errors++;
-                    continue;
-                }
-                geometry_msgs::TransformStamped tfm_W_C;
-                KDL::Frame T_W_C;
-                tf::transformStampedTFToMsg(tf_W_C, tfm_W_C);
-                tf::transformMsgToKDL(tfm_W_C.transform, T_W_C);
-
-                std::vector<KDL::Frame > links_tf(col_model->getLinksCount());
-                std::set<std::string > colliding_links;
-                std::vector<bool > pt_col(pc_.points.size(), false);
-                bool tf_error = false;
-                for (int l_idx = 0; l_idx < col_model->getLinksCount(); l_idx++) {
-                    const boost::shared_ptr< self_collision::Link > plink = col_model->getLink(l_idx);
-                    if (plink->collision_array.size() == 0) {
-                        continue;
-                    }
-                    tf::StampedTransform tf_W_L;
-                    try {
-                        tf_listener_.lookupTransform("world", plink->name, pc_stamp_, tf_W_L);
-                    } catch(tf::TransformException& ex){
-                        ROS_ERROR_STREAM( "Transform error of sensor data: " << ex.what() << ", quitting callback");
-                        tf_error = true;
-                        break;
-                    }
-                    geometry_msgs::TransformStamped tfm_W_L;
-                    KDL::Frame T_W_L;
-                    tf::transformStampedTFToMsg(tf_W_L, tfm_W_L);
-                    tf::transformMsgToKDL(tfm_W_L.transform, T_W_L);
-                    KDL::Frame T_C_L = T_W_C.Inverse() * T_W_L;
-                    links_tf[l_idx] = T_W_L;
-
-                    for (int pidx = 0; pidx < pc_.points.size(); pidx++) {
-                        if (pt_col[pidx]) {
-                            continue;
-                        }
-                        KDL::Frame T_C_P(KDL::Vector(pc_.points[pidx].x, pc_.points[pidx].y, pc_.points[pidx].z));
-                        if (self_collision::checkCollision(shpere, T_C_P, plink, T_C_L)) {
-                            pt_col[pidx] = true;
-                            colliding_links.insert( plink->name );
-                        }
-                    }
-                }
-                if (tf_error) {
-                    errors++;
-                    continue;
-                }
-
-                PclPointCloud pc_out;
-                for (int pidx = 0; pidx < pc_.points.size(); pidx++) {
-                    if (pt_col[pidx]) {
-                        continue;
-                    }
-                    pc_out.push_back( pc_.points[pidx] );
-                }
-
-                sensor_msgs::PointCloud2 ros_pc_out;
-                toROSMsg(pc_out, ros_pc_out);
-                ros_pc_out.header.stamp = pc_stamp_;
-                ros_pc_out.header.frame_id = pc_frame_id_;
-
-                pub_pc_.publish(ros_pc_out);
-                point_cloud_processed_ = true;
-                errors = 0;
-
-            }
-        }
-*/
+        ros::spin();
     }
 };
 

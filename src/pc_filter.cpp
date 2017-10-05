@@ -68,7 +68,7 @@ class PCFilter {
     tf::TransformListener tf_listener_;
     message_filters::Subscriber<sensor_msgs::PointCloud2>* m_pointCloudSub;
     tf::MessageFilter<sensor_msgs::PointCloud2>* m_tfPointCloudSub;
-    ros::Publisher pub_pc_;
+    ros::Publisher pub_pc_, pub_pc_ex_;
 
     typedef pcl::PointCloud<pcl::PointXYZRGB> PclPointCloud;
     PclPointCloud pc_;
@@ -78,6 +78,11 @@ class PCFilter {
 public:
 
     void insertCloudCallback(const sensor_msgs::PointCloud2::ConstPtr& cloud){
+        double horizontal_fov = 1.047;
+        double aspect_w_h = double(cloud->width)/double(cloud->height);
+        double dx = tan(horizontal_fov/2);
+        double dy = dx/aspect_w_h;
+
         if (point_cloud_processed_) {
             point_cloud_processed_ = false;
             sensor_msgs::PointCloud2 resized;
@@ -94,6 +99,23 @@ public:
                 for (int x = 0; x < cloud->width; x += 2) {
                     for (int i = 0; i < cloud->point_step; ++i) {
                         resized.data[int(y/2)*resized.row_step + int(x/2)*resized.point_step + i] = cloud->data[y*cloud->row_step + x*cloud->point_step + i];
+                    }
+                    unsigned char *ptr = &resized.data[int(y/2)*resized.row_step + int(x/2)*resized.point_step];
+                    float px = *((float*)(ptr));
+                    float py = *((float*)(ptr)+1);
+                    float pz = *((float*)(ptr)+2);
+
+                    if (px != px || py != py || pz!= pz) {
+                        px = (float(x)/float(cloud->width)*2.0-1.0)*dx*2.5;
+                        py = (float(y)/float(cloud->height)*2.0-1.0)*dy*2.5;
+                        pz = 2.5;
+                        *((float*)(ptr)) = px;
+                        *((float*)(ptr)+1) = py;
+                        *((float*)(ptr)+2) = pz;
+                        ptr[16] = 100;
+                        ptr[17] = 100;
+                        ptr[18] = 100;
+                        ptr[19] = 100;
                     }
                 }
             }
@@ -114,6 +136,7 @@ public:
         m_tfPointCloudSub->registerCallback(boost::bind(&PCFilter::insertCloudCallback, this, _1));
 
         pub_pc_ = nh_.advertise<sensor_msgs::PointCloud2 >("cloud_out", 10);
+        pub_pc_ex_ = nh_.advertise<sensor_msgs::PointCloud2 >("cloud_ex_out", 10);
     }
 
     ~PCFilter() {
@@ -195,22 +218,28 @@ public:
                 }
 
                 PclPointCloud pc_out;
+                PclPointCloud pc_ex_out;
                 for (int pidx = 0; pidx < pc_.points.size(); pidx++) {
-                    if (pt_col[pidx]) {
-                        continue;
+                    pc_ex_out.push_back( pc_.points[pidx] );
+                    if (!pt_col[pidx]) {
+                        pc_out.push_back( pc_.points[pidx] );
                     }
-                    pc_out.push_back( pc_.points[pidx] );
                 }
 
                 sensor_msgs::PointCloud2 ros_pc_out;
                 toROSMsg(pc_out, ros_pc_out);
                 ros_pc_out.header.stamp = pc_stamp_;
                 ros_pc_out.header.frame_id = pc_frame_id_;
-
                 pub_pc_.publish(ros_pc_out);
+
+                sensor_msgs::PointCloud2 ros_pc_ex_out;
+                toROSMsg(pc_ex_out, ros_pc_ex_out);
+                ros_pc_ex_out.header.stamp = pc_stamp_;
+                ros_pc_ex_out.header.frame_id = pc_frame_id_;
+                pub_pc_ex_.publish(ros_pc_ex_out);
+
                 point_cloud_processed_ = true;
                 errors = 0;
-
             }
         }
     }
