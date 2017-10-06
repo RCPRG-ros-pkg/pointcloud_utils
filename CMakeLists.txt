@@ -5,7 +5,9 @@ project(pointcloud_utils)
 
 find_package(catkin REQUIRED COMPONENTS
   rtt_ros rtt_rosclock std_msgs interactive_markers tf pcl_ros pcl_conversions eigen_conversions cmake_modules collision_convex_model
-  octomap_ros octomap_msgs kdl_conversions pointcloud_utils_msgs planer_utils kin_dyn_model
+  octomap_ros octomap_msgs kdl_conversions pointcloud_utils_msgs
+  #planer_utils
+  kin_dyn_model
   )
 
 

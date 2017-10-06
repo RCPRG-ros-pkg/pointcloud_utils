@@ -60,28 +60,40 @@
 
 #include <collision_convex_model/collision_convex_model.h>
 
+class BoundingSphere {
+public:
+    double radius_;
+    KDL::Vector pos_; 
+};
+
 class PCFilter {
     ros::NodeHandle nh_;
     bool point_cloud_processed_;
-    double tolerance_;
+    //double tolerance_;
 
     tf::TransformListener tf_listener_;
     message_filters::Subscriber<sensor_msgs::PointCloud2>* m_pointCloudSub;
     tf::MessageFilter<sensor_msgs::PointCloud2>* m_tfPointCloudSub;
-    ros::Publisher pub_pc_, pub_pc_ex_;
+    ros::Publisher pub_pc_;//, pub_pc_ex_;
 
     typedef pcl::PointCloud<pcl::PointXYZRGB> PclPointCloud;
     PclPointCloud pc_;
     ros::Time pc_stamp_;
     std::string pc_frame_id_;
 
+    // ROS params
+    double horizontal_fov_;
+    double axial_fov_;
+
 public:
 
     void insertCloudCallback(const sensor_msgs::PointCloud2::ConstPtr& cloud){
-        double horizontal_fov = 1.047;
         double aspect_w_h = double(cloud->width)/double(cloud->height);
-        double dx = tan(horizontal_fov/2);
+        double dx = tan(horizontal_fov_/2);
         double dy = dx/aspect_w_h;
+        if (axial_fov_ == 0.0) {
+            axial_fov_ = atan(sqrt(dx*dx + dy*dy));            
+        }
 
         if (point_cloud_processed_) {
             point_cloud_processed_ = false;
@@ -129,14 +141,18 @@ public:
     PCFilter() :
         nh_(),
         point_cloud_processed_(true),
-        tolerance_(0.04)
+        //tolerance_(0.04),
+        axial_fov_(0.0)
     {
         m_pointCloudSub = new message_filters::Subscriber<sensor_msgs::PointCloud2> (nh_, "cloud_in", 5);
         m_tfPointCloudSub = new tf::MessageFilter<sensor_msgs::PointCloud2> (*m_pointCloudSub, tf_listener_, "world", 5);
         m_tfPointCloudSub->registerCallback(boost::bind(&PCFilter::insertCloudCallback, this, _1));
 
         pub_pc_ = nh_.advertise<sensor_msgs::PointCloud2 >("cloud_out", 10);
-        pub_pc_ex_ = nh_.advertise<sensor_msgs::PointCloud2 >("cloud_ex_out", 10);
+        //pub_pc_ex_ = nh_.advertise<sensor_msgs::PointCloud2 >("cloud_ex_out", 10);
+
+        // TODO: read FOV from ROS param
+        horizontal_fov_ = 1.047;
     }
 
     ~PCFilter() {
@@ -144,6 +160,7 @@ public:
 
     void spin() {
 
+        // read ROS param
         std::string robot_description_str;
         nh_.getParam("/robot_description", robot_description_str);
 
@@ -152,7 +169,9 @@ public:
         //
         boost::shared_ptr<self_collision::CollisionModel> col_model = self_collision::CollisionModel::parseURDF(robot_description_str);
 
-        boost::shared_ptr< self_collision::Collision > shpere = self_collision::createCollisionSphere(tolerance_, KDL::Frame());
+        std::vector<KDL::Frame > links_tf(col_model->getLinksCount());
+
+        //boost::shared_ptr< self_collision::Collision > shpere = self_collision::createCollisionSphere(tolerance_, KDL::Frame());
 
         ros::Rate loop_rate(5);
         int errors = 0;
@@ -179,7 +198,9 @@ public:
                 tf::transformStampedTFToMsg(tf_W_C, tfm_W_C);
                 tf::transformMsgToKDL(tfm_W_C.transform, T_W_C);
 
-                std::vector<KDL::Frame > links_tf(col_model->getLinksCount());
+                // for debug
+                std::vector<std::string > dbg_links_inside;
+
                 std::vector<bool > pt_col(pc_.points.size(), false);
                 bool tf_error = false;
                 for (int l_idx = 0; l_idx < col_model->getLinksCount(); l_idx++) {
@@ -202,6 +223,39 @@ public:
                     KDL::Frame T_C_L = T_W_C.Inverse() * T_W_L;
                     links_tf[l_idx] = T_W_L;
 
+                    // check if the bounding sphere of any collision object of the link intersects with the frustrum
+                    bool outside = true;
+                    for (self_collision::Link::VecPtrCollision::const_iterator it=plink->collision_array.begin(), end=plink->collision_array.end(); it != end; ++it) {
+                        KDL::Frame T_C_COL = T_C_L * (*it)->origin;
+                        KDL::Vector bs_C = T_C_COL * KDL::Vector();
+                        double x = sqrt(bs_C.x()*bs_C.x() + bs_C.y()*bs_C.y());
+                        double y = bs_C.z();
+                        double v = x * tan(axial_fov_) + y; // z coordinate of point projection into z axis along frustrum rarial
+                        double d = x * cos(axial_fov_) - y * sin(axial_fov_);
+                        if ( (v > 0 && d < (*it)->geometry->getBroadphaseRadius()) ||
+                                (v <= 0 && bs_C.Norm() < (*it)->geometry->getBroadphaseRadius())) {
+                            outside = false;
+
+                            for (int pidx = 0; pidx < pc_.points.size(); pidx++) {
+                                if (pt_col[pidx]) {
+                                    continue;
+                                }
+                                KDL::Vector r_e(pc_.points[pidx].x, pc_.points[pidx].y, pc_.points[pidx].z);
+                                KDL::Vector r_s = r_e;
+                                r_s.Normalize();
+                                r_s = r_s * 0.04;
+                                if (col_model->checkRayCollision((*it)->geometry.get(), T_C_COL, r_s, r_e)) {
+                                    pt_col[pidx] = true;
+                                }
+                            }
+                        }
+                    }
+                    if (outside) {
+                        continue;
+                    }
+
+                    dbg_links_inside.push_back(plink->name);
+/*
                     for (int pidx = 0; pidx < pc_.points.size(); pidx++) {
                         if (pt_col[pidx]) {
                             continue;
@@ -211,16 +265,23 @@ public:
                             pt_col[pidx] = true;
                         }
                     }
+*/
                 }
                 if (tf_error) {
                     errors++;
                     continue;
                 }
 
+                std::cout << "links in frustrum: ";
+                for (int i = 0; i < dbg_links_inside.size(); ++i) {
+                    std::cout << dbg_links_inside[i] << ", ";
+                }
+                std::cout << std::endl;
+
                 PclPointCloud pc_out;
-                PclPointCloud pc_ex_out;
+                //PclPointCloud pc_ex_out;
                 for (int pidx = 0; pidx < pc_.points.size(); pidx++) {
-                    pc_ex_out.push_back( pc_.points[pidx] );
+                    //pc_ex_out.push_back( pc_.points[pidx] );
                     if (!pt_col[pidx]) {
                         pc_out.push_back( pc_.points[pidx] );
                     }
@@ -232,11 +293,11 @@ public:
                 ros_pc_out.header.frame_id = pc_frame_id_;
                 pub_pc_.publish(ros_pc_out);
 
-                sensor_msgs::PointCloud2 ros_pc_ex_out;
-                toROSMsg(pc_ex_out, ros_pc_ex_out);
-                ros_pc_ex_out.header.stamp = pc_stamp_;
-                ros_pc_ex_out.header.frame_id = pc_frame_id_;
-                pub_pc_ex_.publish(ros_pc_ex_out);
+                //sensor_msgs::PointCloud2 ros_pc_ex_out;
+                //toROSMsg(pc_ex_out, ros_pc_ex_out);
+                //ros_pc_ex_out.header.stamp = pc_stamp_;
+                //ros_pc_ex_out.header.frame_id = pc_frame_id_;
+                //pub_pc_ex_.publish(ros_pc_ex_out);
 
                 point_cloud_processed_ = true;
                 errors = 0;
