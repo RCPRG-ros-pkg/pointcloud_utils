@@ -74,7 +74,7 @@ class PCFilter {
     tf::TransformListener tf_listener_;
     message_filters::Subscriber<sensor_msgs::PointCloud2>* m_pointCloudSub;
     tf::MessageFilter<sensor_msgs::PointCloud2>* m_tfPointCloudSub;
-    ros::Publisher pub_pc_;//, pub_pc_ex_;
+    ros::Publisher pub_pc_;
 
     typedef pcl::PointCloud<pcl::PointXYZRGB> PclPointCloud;
     PclPointCloud pc_;
@@ -83,7 +83,12 @@ class PCFilter {
 
     // ROS params
     double horizontal_fov_;
+
+    double vertical_fov_;
     double axial_fov_;
+
+    int width_;
+    int height_;
 
 public:
 
@@ -92,11 +97,11 @@ public:
         double dx = tan(horizontal_fov_/2);
         double dy = dx/aspect_w_h;
         if (axial_fov_ == 0.0) {
-            axial_fov_ = atan(sqrt(dx*dx + dy*dy));            
+            axial_fov_ = atan(sqrt(dx*dx + dy*dy));
+            vertical_fov_ = horizontal_fov_/double(cloud->width)*double(cloud->height);
         }
 
         if (point_cloud_processed_) {
-            point_cloud_processed_ = false;
             sensor_msgs::PointCloud2 resized;
             resized.header = cloud->header;
             resized.height = cloud->height/2;
@@ -135,15 +140,23 @@ public:
             pcl::fromROSMsg(resized, pc_);
             pc_stamp_ = cloud->header.stamp;
             pc_frame_id_ = cloud->header.frame_id;
+            width_ = resized.width;
+            height_ = resized.height;
+            point_cloud_processed_ = false;
         }
     }
 
-    PCFilter() :
-        nh_(),
-        point_cloud_processed_(true),
-        //tolerance_(0.04),
-        axial_fov_(0.0)
+    PCFilter()
+        : nh_()
+        , point_cloud_processed_(true)
+        //, tolerance_(0.04)
+        , axial_fov_(0.0)
+        , vertical_fov_(0)
+        , width_(0)
+        , height_(0)
     {
+        ros::NodeHandle private_nh("~");
+
         m_pointCloudSub = new message_filters::Subscriber<sensor_msgs::PointCloud2> (nh_, "cloud_in", 5);
         m_tfPointCloudSub = new tf::MessageFilter<sensor_msgs::PointCloud2> (*m_pointCloudSub, tf_listener_, "world", 5);
         m_tfPointCloudSub->registerCallback(boost::bind(&PCFilter::insertCloudCallback, this, _1));
@@ -152,13 +165,15 @@ public:
         //pub_pc_ex_ = nh_.advertise<sensor_msgs::PointCloud2 >("cloud_ex_out", 10);
 
         // TODO: read FOV from ROS param
-        horizontal_fov_ = 1.047;
+        private_nh.param("horizontal_fov", horizontal_fov_, horizontal_fov_);
     }
 
     ~PCFilter() {
     }
 
     void spin() {
+
+        const double PI = 3.141592653589793L;
 
         // read ROS param
         std::string robot_description_str;
@@ -198,9 +213,6 @@ public:
                 tf::transformStampedTFToMsg(tf_W_C, tfm_W_C);
                 tf::transformMsgToKDL(tfm_W_C.transform, T_W_C);
 
-                // for debug
-                std::vector<std::string > dbg_links_inside;
-
                 std::vector<bool > pt_col(pc_.points.size(), false);
                 bool tf_error = false;
                 for (int l_idx = 0; l_idx < col_model->getLinksCount(); l_idx++) {
@@ -223,19 +235,15 @@ public:
                     KDL::Frame T_C_L = T_W_C.Inverse() * T_W_L;
                     links_tf[l_idx] = T_W_L;
 
-                    // check if the bounding sphere of any collision object of the link intersects with the frustrum
-                    bool outside = true;
                     for (self_collision::Link::VecPtrCollision::const_iterator it=plink->collision_array.begin(), end=plink->collision_array.end(); it != end; ++it) {
                         KDL::Frame T_C_COL = T_C_L * (*it)->origin;
                         KDL::Vector bs_C = T_C_COL * KDL::Vector();
-                        double x = sqrt(bs_C.x()*bs_C.x() + bs_C.y()*bs_C.y());
-                        double y = bs_C.z();
-                        double v = x * tan(axial_fov_) + y; // z coordinate of point projection into z axis along frustrum rarial
-                        double d = x * cos(axial_fov_) - y * sin(axial_fov_);
-                        if ( (v > 0 && d < (*it)->geometry->getBroadphaseRadius()) ||
-                                (v <= 0 && bs_C.Norm() < (*it)->geometry->getBroadphaseRadius())) {
-                            outside = false;
-
+                        double dist_C = bs_C.Norm();
+                        double radius = (*it)->geometry->getBroadphaseRadius();
+                        if (dist_C < 0.01 || dist_C < radius) {
+                            // the origin of the bounding sphere is near camera origin,
+                            // or the origin of camera is inside bounding sphere
+                            // perform check for all rays
                             for (int pidx = 0; pidx < pc_.points.size(); pidx++) {
                                 if (pt_col[pidx]) {
                                     continue;
@@ -248,35 +256,63 @@ public:
                                     pt_col[pidx] = true;
                                 }
                             }
+                            std::cout << "full check for link: " << plink->name << std::endl;
                         }
-                    }
-                    if (outside) {
-                        continue;
-                    }
+                        else {
+                            // get the angular size of the bounding sphere
+                            double angle_R = asin(radius/dist_C);
+                            // get angle of sphere origin (camera z axis is treated as x axis for atan2)
+                            // 1. the xz plane
+                            double angle_C_x = atan2(bs_C.x(), bs_C.z());
+                            if (fabs(angle_C_x) > horizontal_fov_/2 + PI/2) {
+                                // the bounding sphere is surely outside the frustrum
+                                continue;
+                            }
+                            // determine the horizontal range
+                            int x_min = ((angle_C_x-angle_R)+horizontal_fov_/2)/horizontal_fov_*width_;
+                            int x_max = ((angle_C_x+angle_R)+horizontal_fov_/2)/horizontal_fov_*width_;
+                            x_min = std::max(std::min(x_min, width_), 0);
+                            x_max = std::max(std::min(x_max, width_), 0);
 
-                    dbg_links_inside.push_back(plink->name);
-/*
-                    for (int pidx = 0; pidx < pc_.points.size(); pidx++) {
-                        if (pt_col[pidx]) {
-                            continue;
-                        }
-                        KDL::Frame T_C_P(KDL::Vector(pc_.points[pidx].x, pc_.points[pidx].y, pc_.points[pidx].z));
-                        if (self_collision::checkCollision(shpere, T_C_P, plink, T_C_L)) {
-                            pt_col[pidx] = true;
+                            // 2. the yz plane
+                            double angle_C_y = atan2(bs_C.y(), bs_C.z());
+                            if (fabs(angle_C_y) > vertical_fov_/2 + PI/2) {
+                                // the bounding sphere is surely outside the frustrum
+                                continue;
+                            }
+                            // determine the vertical range
+                            int y_min = ((angle_C_y-angle_R)+vertical_fov_/2)/vertical_fov_*height_;
+                            int y_max = ((angle_C_y+angle_R)+vertical_fov_/2)/vertical_fov_*height_;
+                            y_min = std::max(std::min(y_min, height_), 0);
+                            y_max = std::max(std::min(y_max, height_), 0);
+
+                            //bool partial_check = false;
+                            for (int y = y_min; y < y_max; ++y) {
+                                for (int x = x_min; x < x_max; ++x) {
+                                    //partial_check = true;
+                                    int pidx = y * width_ + x;
+                                    if (pt_col[pidx]) {
+                                        continue;
+                                    }
+                                    KDL::Vector r_e(pc_.points[pidx].x, pc_.points[pidx].y, pc_.points[pidx].z);
+                                    KDL::Vector r_s = r_e;
+                                    r_s.Normalize();
+                                    r_s = r_s * 0.04;
+                                    if (col_model->checkRayCollision((*it)->geometry.get(), T_C_COL, r_s, r_e)) {
+                                        pt_col[pidx] = true;
+                                    }
+                                }
+                            }
+                            //if (partial_check) {
+                            //    std::cout << "partial check for link: " << plink->name << std::endl;
+                            //}
                         }
                     }
-*/
                 }
                 if (tf_error) {
                     errors++;
                     continue;
                 }
-
-                std::cout << "links in frustrum: ";
-                for (int i = 0; i < dbg_links_inside.size(); ++i) {
-                    std::cout << dbg_links_inside[i] << ", ";
-                }
-                std::cout << std::endl;
 
                 PclPointCloud pc_out;
                 //PclPointCloud pc_ex_out;

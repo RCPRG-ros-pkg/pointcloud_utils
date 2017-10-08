@@ -73,19 +73,6 @@ using octomap_msgs::Octomap;
 
 class OctomapFilter {
     ros::NodeHandle nh_;
-/*    bool point_cloud_processed_;
-    double tolerance_;
-
-    tf::TransformListener tf_listener_;
-    message_filters::Subscriber<sensor_msgs::PointCloud2>* m_pointCloudSub;
-    tf::MessageFilter<sensor_msgs::PointCloud2>* m_tfPointCloudSub;
-    ros::Publisher pub_pc_;
-
-    typedef pcl::PointCloud<pcl::PointXYZRGB> PclPointCloud;
-    PclPointCloud pc_;
-    ros::Time pc_stamp_;
-    std::string pc_frame_id_;
-*/
 
     tf::TransformListener tf_listener_;
 
@@ -98,8 +85,21 @@ class OctomapFilter {
     ros::Publisher  m_binaryMapPub;
     ros::Publisher  m_binaryUnknownMapPub, m_markerPub, m_markerPubMerged;
 
+    octomap::OcTreeKey key_min_;
+    octomap::OcTreeKey key_max_;
+
     boost::shared_ptr<self_collision::CollisionModel> col_model_;
-    std::vector<KDL::Frame > links_tf_;
+
+    // ROS parameters
+    double resolution_;
+    double xmin_;
+    double xmax_;
+    double ymin_;
+    double ymax_;
+    double zmin_;
+    double zmax_;
+    bool visualize_unknown_;
+    bool visualize_merged_;
 
 public:
 
@@ -111,52 +111,59 @@ public:
 
     OctomapFilter()
         : nh_()
+        , resolution_(0.1)
+        , xmin_(-1.5)
+        , xmax_(1.5)
+        , ymin_(-1.5)
+        , ymax_(1.5)
+        , zmin_(-1.5)
+        , zmax_(1.5)
+        , visualize_unknown_(false)
+        , visualize_merged_(false)
     {
+        ros::NodeHandle private_nh("~");
         m_fullMapSub = nh_.subscribe("octomap_full", 1, &OctomapFilter::callback, this);
         m_binaryUnknownMapPub = nh_.advertise<Octomap>("octomap_unknown_binary", 1, true);
         m_binaryMapPub = nh_.advertise<Octomap>("octomap_merged_binary", 1, true);
         m_markerPub = nh_.advertise<visualization_msgs::MarkerArray>("unknown_cells_vis_array", 1, true);
         m_markerPubMerged = nh_.advertise<visualization_msgs::MarkerArray>("merged_cells_vis_array", 1, true);
-/*
-        m_unknowntree.reset(new octomap::OcTree(0.025));
-        m_unknowntree->updateNode(octomath::Vector3(-3,-3,-3), true, true);
-        m_unknowntree->updateNode(octomath::Vector3(-3,-3,3), true, true);
-        m_unknowntree->updateNode(octomath::Vector3(-3,3,-3), true, true);
-        m_unknowntree->updateNode(octomath::Vector3(-3,3,3), true, true);
-        m_unknowntree->updateNode(octomath::Vector3(3,-3,-3), true, true);
-        m_unknowntree->updateNode(octomath::Vector3(3,-3,3), true, true);
-        m_unknowntree->updateNode(octomath::Vector3(3,3,-3), true, true);
-        m_unknowntree->updateNode(octomath::Vector3(3,3,3), true, true);
-        m_unknowntree->updateInnerOccupancy();
-        std::cout << "writing octomap to .ot file" << std::endl;
-        if (!m_unknowntree->write("/home/dseredyn/ws_stero/map.ot")) {
-            std::cout << "error" << std::endl;
-        }
-        std::cout << "done" << std::endl;
-*/
 
-        m_unknowntree.reset(new octomap::OcTree(0.1));
-        for (double z = 0.0; z < 2.0; z += 0.05) {
-            for (double y = -1.5; y < 1.5; y += 0.05) {
-                for (double x = -1.5; x < 1.5; x += 0.05) {
-                    m_unknowntree->updateNode(octomath::Vector3(x,y,z), true, true);
+        //
+        // read ROS param
+        //
+        std::string robot_description_str;
+        nh_.getParam("/robot_description", robot_description_str);
+        private_nh.param("resolution", resolution_, resolution_);
+        private_nh.param("xmin", xmin_, xmin_);
+        private_nh.param("xmax", xmax_, xmax_);
+        private_nh.param("ymin", ymin_, ymin_);
+        private_nh.param("ymax", ymax_, ymax_);
+        private_nh.param("zmin", zmin_, zmin_);
+        private_nh.param("zmax", zmax_, zmax_);
+        private_nh.param("visualize_unknown", visualize_unknown_, visualize_unknown_);
+        private_nh.param("visualize_merged", visualize_merged_, visualize_merged_);
+        ROS_INFO("param visualize_unknown=%s", (visualize_unknown_?"true":"false"));
+
+        //
+        // occupancy map for unknown space
+        //
+        m_unknowntree.reset(new octomap::OcTree(resolution_));
+        key_min_ = m_unknowntree->coordToKey(xmin_, ymin_, zmin_);
+        key_max_ = m_unknowntree->coordToKey(xmax_, ymax_, zmax_);
+        for (int i = key_min_[0]; i < key_max_[0]; ++i) {
+            for (int j = key_min_[1]; j < key_max_[1]; ++j) {
+                for (int k = key_min_[2]; k < key_max_[2]; ++k) {
+                    m_unknowntree->updateNode(octomap::OcTreeKey(i,j,k), true, true);
                 }
             }
         }
-
         m_unknowntree->updateInnerOccupancy();
-
-        // read ROS param
-        std::string robot_description_str;
-        nh_.getParam("/robot_description", robot_description_str);
+        m_unknowntree->prune();
 
         //
         // collision model
         //
         col_model_ = self_collision::CollisionModel::parseURDF(robot_description_str);
-
-        links_tf_.resize(col_model_->getLinksCount());
-
     }
 
     ~OctomapFilter() {
@@ -171,30 +178,20 @@ public:
         int m_treeDepth = m_octree->getTreeDepth();
         int m_maxTreeDepth = m_treeDepth;
 
-        for (double z = 0.0; z < 2.0; z += 0.05) {
-            for (double y = -1.5; y < 1.5; y += 0.05) {
-                for (double x = -1.5; x < 1.5; x += 0.05) {
-                    octomap::OcTreeNode *node = m_octree->search(octomath::Vector3(x,y,z));
+        for (int i = key_min_[0]; i < key_max_[0]; ++i) {
+            for (int j = key_min_[1]; j < key_max_[1]; ++j) {
+                for (int k = key_min_[2]; k < key_max_[2]; ++k) {
+                    octomath::Vector3 coord = m_unknowntree->keyToCoord(octomap::OcTreeKey(i,j,k));
+                    octomap::OcTreeNode *node = m_octree->search(coord);
                     if (node) {
-                        m_unknowntree->updateNode(octomath::Vector3(x,y,z), false, true);
+                        m_unknowntree->updateNode(octomap::OcTreeKey(i,j,k), false, true);
                     }
                 }
             }
         }
 
-//    for (octomap::OcTree::leaf_bbx_iterator it = m_octree->begin_leafs_bbx(octomath::Vector3(-2,-2,-2), octomath::Vector3(2,2,2)),
-//        end = m_octree->end_leafs_bbx(); it != end; ++it)
-/*    for (octomap::OcTree::iterator it = m_octree->begin(),//octomath::Vector3(-2,-2,-2), octomath::Vector3(2,2,2)),
-        end = m_octree->end(); it != end; ++it)
-    {
-//        if (m_unknowntree->isNodeOccupied(*it)){
-        m_unknowntree->updateNode(it.getCoordinate(), false, true);
-    }
-*/
-
         m_unknowntree->updateInnerOccupancy();
 
-        //bool tf_error = false;
         for (int l_idx = 0; l_idx < col_model_->getLinksCount(); l_idx++) {
             const boost::shared_ptr< self_collision::Link > plink = col_model_->getLink(l_idx);
             if (plink->collision_array.size() == 0) {
@@ -206,23 +203,23 @@ public:
             } catch(tf::TransformException& ex){
                 ROS_ERROR_STREAM( "Transform error of sensor data: " << ex.what() << ", quitting callback");
                 continue;
-                //tf_error = true;
-                //break;
             }
             geometry_msgs::TransformStamped tfm_W_L;
             KDL::Frame T_W_L;
             tf::transformStampedTFToMsg(tf_W_L, tfm_W_L);
             tf::transformMsgToKDL(tfm_W_L.transform, T_W_L);
-            links_tf_[l_idx] = T_W_L;
 
             for (self_collision::Link::VecPtrCollision::const_iterator it=plink->collision_array.begin(), end=plink->collision_array.end(); it != end; ++it) {
-                self_collision::removeNodesFromOctomap(m_unknowntree, (*it)->geometry, T_W_L * (*it)->origin);
+                self_collision::removeNodesFromOctomap(m_unknowntree, (*it)->geometry.get(), T_W_L * (*it)->origin);
             }
         }
 
-//        if (!tf_error) {
-//            self_collision::removeNodesFromOctomap(boost::shared_ptr<octomap::OcTree > &oc, const boost::shared_ptr<Geometry > &geom, const KDL::Frame &T_O_G) {
-//        }
+//        m_unknowntree->updateInnerOccupancy();
+
+        // fix for a bug near origin: collision between velma torso and octomap
+        self_collision::Sphere sp(0.3);
+        self_collision::removeNodesFromOctomap(m_unknowntree, &sp, KDL::Frame());
+
         m_unknowntree->updateInnerOccupancy();
 
         m_unknowntree->prune();
@@ -230,18 +227,22 @@ public:
         //
         // merge octomaps
         //
+        double rs2 = m_octree->getResolution()/2;
         for (octomap::OcTree::iterator it = m_unknowntree->begin_leafs(),
             end = m_unknowntree->end_leafs(); it != end; ++it)
         {
             if (m_unknowntree->isNodeOccupied(*it)) {
-                octomap::OcTreeKey key = m_octree->coordToKey( it.getCoordinate() );
+                double rb2 = it.getSize()/2;
+                octomap::OcTreeKey key = m_octree->coordToKey( it.getX() - rb2 + rs2, it.getY() - rb2 + rs2, it.getZ() - rb2 + rs2 );
                 int steps = it.getSize() / m_octree->getResolution();
                 if (steps == 0) {
                     steps = 1;
                 }
-                for (int i = (-steps)/2; i <= steps/2; ++i) {
-                    for (int j = (-steps)/2; j <= steps/2; ++j) {
-                        for (int k = (-steps)/2; k <= steps/2; ++k) {
+                int start = 0;
+                int end = steps;
+                for (int i = start; i < end; ++i) {
+                    for (int j = start; j < end; ++j) {
+                        for (int k = start; k < end; ++k) {
                             m_octree->updateNode(octomap::OcTreeKey(key[0]+i, key[1]+j, key[2]+k), true, true);
                         }
                     }
@@ -253,109 +254,112 @@ public:
         m_octree->prune();
 
         //
-        // visualize
+        // visualize unknown
         //
-        // init markers:
-        visualization_msgs::MarkerArray occupiedNodesVis;
-        // each array stores all cubes of a different size, one for each depth level:
-        occupiedNodesVis.markers.resize(m_treeDepth+1);
+        if (visualize_unknown_) {
+            // init markers:
+            visualization_msgs::MarkerArray occupiedNodesVis;
+            // each array stores all cubes of a different size, one for each depth level:
+            occupiedNodesVis.markers.resize(m_treeDepth+1);
 
-        // now, traverse all leafs in the tree:
-        for (octomap::OcTree::iterator it = m_unknowntree->begin(m_maxTreeDepth),
-            end = m_unknowntree->end(); it != end; ++it)
-        {
-            if (m_unknowntree->isNodeOccupied(*it)){
-                double z = it.getZ();
-                double size = it.getSize();
-                double x = it.getX();
-                double y = it.getY();
+            // now, traverse all leafs in the tree:
+            for (octomap::OcTree::iterator it = m_unknowntree->begin(m_maxTreeDepth),
+                end = m_unknowntree->end(); it != end; ++it)
+            {
+                if (m_unknowntree->isNodeOccupied(*it)){
+                    double z = it.getZ();
+                    double size = it.getSize();
+                    double x = it.getX();
+                    double y = it.getY();
 
-                unsigned idx = it.getDepth();
-                assert(idx < occupiedNodesVis.markers.size());
+                    unsigned idx = it.getDepth();
+                    assert(idx < occupiedNodesVis.markers.size());
 
-                geometry_msgs::Point cubeCenter;
-                cubeCenter.x = x;
-                cubeCenter.y = y;
-                cubeCenter.z = z;
+                    geometry_msgs::Point cubeCenter;
+                    cubeCenter.x = x;
+                    cubeCenter.y = y;
+                    cubeCenter.z = z;
 
-                occupiedNodesVis.markers[idx].points.push_back(cubeCenter);
+                    occupiedNodesVis.markers[idx].points.push_back(cubeCenter);
+                }
             }
+
+            for (unsigned i= 0; i < occupiedNodesVis.markers.size(); ++i){
+                double size = m_unknowntree->getNodeSize(i);
+
+                occupiedNodesVis.markers[i].header.frame_id = frame_id;
+                occupiedNodesVis.markers[i].header.stamp = rostime;
+                occupiedNodesVis.markers[i].ns = "map";
+                occupiedNodesVis.markers[i].id = i;
+                occupiedNodesVis.markers[i].type = visualization_msgs::Marker::CUBE_LIST;
+                occupiedNodesVis.markers[i].scale.x = size;
+                occupiedNodesVis.markers[i].scale.y = size;
+                occupiedNodesVis.markers[i].scale.z = size;
+                occupiedNodesVis.markers[i].color = m_color;
+
+
+                if (occupiedNodesVis.markers[i].points.size() > 0)
+                  occupiedNodesVis.markers[i].action = visualization_msgs::Marker::ADD;
+                else
+                  occupiedNodesVis.markers[i].action = visualization_msgs::Marker::DELETE;
+            }
+
+            m_markerPub.publish(occupiedNodesVis);
         }
-
-        for (unsigned i= 0; i < occupiedNodesVis.markers.size(); ++i){
-            double size = m_unknowntree->getNodeSize(i);
-
-            occupiedNodesVis.markers[i].header.frame_id = frame_id;
-            occupiedNodesVis.markers[i].header.stamp = rostime;
-            occupiedNodesVis.markers[i].ns = "map";
-            occupiedNodesVis.markers[i].id = i;
-            occupiedNodesVis.markers[i].type = visualization_msgs::Marker::CUBE_LIST;
-            occupiedNodesVis.markers[i].scale.x = size;
-            occupiedNodesVis.markers[i].scale.y = size;
-            occupiedNodesVis.markers[i].scale.z = size;
-            occupiedNodesVis.markers[i].color = m_color;
-
-
-            if (occupiedNodesVis.markers[i].points.size() > 0)
-              occupiedNodesVis.markers[i].action = visualization_msgs::Marker::ADD;
-            else
-              occupiedNodesVis.markers[i].action = visualization_msgs::Marker::DELETE;
-        }
-
-        m_markerPub.publish(occupiedNodesVis);
 
         //
         // visualize merged
         //
-        // init markers:
-        visualization_msgs::MarkerArray occupiedNodesVisMerged;
-        // each array stores all cubes of a different size, one for each depth level:
-        occupiedNodesVisMerged.markers.resize(m_treeDepth+1);
+        if (visualize_merged_) {
+            // init markers:
+            visualization_msgs::MarkerArray occupiedNodesVisMerged;
+            // each array stores all cubes of a different size, one for each depth level:
+            occupiedNodesVisMerged.markers.resize(m_treeDepth+1);
 
-        // now, traverse all leafs in the tree:
-        for (octomap::OcTree::iterator it = m_octree->begin(m_maxTreeDepth),
-            end = m_octree->end(); it != end; ++it)
-        {
-            if (m_octree->isNodeOccupied(*it)){
-                double z = it.getZ();
-                double size = it.getSize();
-                double x = it.getX();
-                double y = it.getY();
+            // now, traverse all leafs in the tree:
+            for (octomap::OcTree::iterator it = m_octree->begin(m_maxTreeDepth),
+                end = m_octree->end(); it != end; ++it)
+            {
+                if (m_octree->isNodeOccupied(*it)){
+                    double z = it.getZ();
+                    double size = it.getSize();
+                    double x = it.getX();
+                    double y = it.getY();
 
-                unsigned idx = it.getDepth();
-                assert(idx < occupiedNodesVisMerged.markers.size());
+                    unsigned idx = it.getDepth();
+                    assert(idx < occupiedNodesVisMerged.markers.size());
 
-                geometry_msgs::Point cubeCenter;
-                cubeCenter.x = x;
-                cubeCenter.y = y;
-                cubeCenter.z = z;
+                    geometry_msgs::Point cubeCenter;
+                    cubeCenter.x = x;
+                    cubeCenter.y = y;
+                    cubeCenter.z = z;
 
-                occupiedNodesVisMerged.markers[idx].points.push_back(cubeCenter);
+                    occupiedNodesVisMerged.markers[idx].points.push_back(cubeCenter);
+                }
             }
+
+            for (unsigned i= 0; i < occupiedNodesVisMerged.markers.size(); ++i){
+                double size = m_octree->getNodeSize(i);
+
+                occupiedNodesVisMerged.markers[i].header.frame_id = frame_id;
+                occupiedNodesVisMerged.markers[i].header.stamp = rostime;
+                occupiedNodesVisMerged.markers[i].ns = "map";
+                occupiedNodesVisMerged.markers[i].id = i;
+                occupiedNodesVisMerged.markers[i].type = visualization_msgs::Marker::CUBE_LIST;
+                occupiedNodesVisMerged.markers[i].scale.x = size;
+                occupiedNodesVisMerged.markers[i].scale.y = size;
+                occupiedNodesVisMerged.markers[i].scale.z = size;
+                occupiedNodesVisMerged.markers[i].color = m_color;
+
+
+                if (occupiedNodesVisMerged.markers[i].points.size() > 0)
+                  occupiedNodesVisMerged.markers[i].action = visualization_msgs::Marker::ADD;
+                else
+                  occupiedNodesVisMerged.markers[i].action = visualization_msgs::Marker::DELETE;
+            }
+
+            m_markerPubMerged.publish(occupiedNodesVisMerged);
         }
-
-        for (unsigned i= 0; i < occupiedNodesVisMerged.markers.size(); ++i){
-            double size = m_octree->getNodeSize(i);
-
-            occupiedNodesVisMerged.markers[i].header.frame_id = frame_id;
-            occupiedNodesVisMerged.markers[i].header.stamp = rostime;
-            occupiedNodesVisMerged.markers[i].ns = "map";
-            occupiedNodesVisMerged.markers[i].id = i;
-            occupiedNodesVisMerged.markers[i].type = visualization_msgs::Marker::CUBE_LIST;
-            occupiedNodesVisMerged.markers[i].scale.x = size;
-            occupiedNodesVisMerged.markers[i].scale.y = size;
-            occupiedNodesVisMerged.markers[i].scale.z = size;
-            occupiedNodesVisMerged.markers[i].color = m_color;
-
-
-            if (occupiedNodesVisMerged.markers[i].points.size() > 0)
-              occupiedNodesVisMerged.markers[i].action = visualization_msgs::Marker::ADD;
-            else
-              occupiedNodesVisMerged.markers[i].action = visualization_msgs::Marker::DELETE;
-        }
-
-        m_markerPubMerged.publish(occupiedNodesVisMerged);
-
 
         Octomap map;
         map.header.frame_id = frame_id;
