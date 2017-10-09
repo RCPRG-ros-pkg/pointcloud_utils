@@ -256,7 +256,7 @@ public:
                                     pt_col[pidx] = true;
                                 }
                             }
-                            std::cout << "full check for link: " << plink->name << std::endl;
+                            //std::cout << "full check for link: " << plink->name << std::endl;
                         }
                         else {
                             // get the angular size of the bounding sphere

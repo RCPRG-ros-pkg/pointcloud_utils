@@ -77,6 +77,7 @@ class OctomapFilter {
     tf::TransformListener tf_listener_;
 
     boost::shared_ptr<octomap::OcTree> m_octree;
+    boost::shared_ptr<octomap::OcTree> m_octree_merged;
     boost::shared_ptr<octomap::OcTree> m_unknowntree;
 
     std_msgs::ColorRGBA m_color;
@@ -85,10 +86,14 @@ class OctomapFilter {
     ros::Publisher  m_binaryMapPub;
     ros::Publisher  m_binaryUnknownMapPub, m_markerPub, m_markerPubMerged;
 
+    ros::ServiceServer m_octomapBinaryService;
+
     octomap::OcTreeKey key_min_;
     octomap::OcTreeKey key_max_;
 
     boost::shared_ptr<self_collision::CollisionModel> col_model_;
+
+    std::string m_worldFrameId;
 
     // ROS parameters
     double resolution_;
@@ -106,7 +111,20 @@ public:
     void callback(const Octomap& map)
     {
         m_octree.reset(dynamic_cast<octomap::OcTree*>(octomap_msgs::fullMsgToMap(map)));
-        publishAll(map.header.stamp, map.header.frame_id);
+        m_worldFrameId = map.header.frame_id;
+        publishAll(map.header.stamp);
+    }
+
+    bool octomapBinarySrv(octomap_msgs::GetOctomap::Request  &req,
+                                        octomap_msgs::GetOctomap::Response &res)
+    {
+      ROS_INFO("Sending binary map data on service request");
+      res.map.header.frame_id = m_worldFrameId;
+      res.map.header.stamp = ros::Time::now();
+      if (!octomap_msgs::binaryMapToMsg(*m_octree_merged, res.map))
+        return false;
+
+      return true;
     }
 
     OctomapFilter()
@@ -122,11 +140,16 @@ public:
         , visualize_merged_(false)
     {
         ros::NodeHandle private_nh("~");
+
+        // ROS topics
         m_fullMapSub = nh_.subscribe("octomap_full", 1, &OctomapFilter::callback, this);
         m_binaryUnknownMapPub = nh_.advertise<Octomap>("octomap_unknown_binary", 1, true);
         m_binaryMapPub = nh_.advertise<Octomap>("octomap_merged_binary", 1, true);
         m_markerPub = nh_.advertise<visualization_msgs::MarkerArray>("unknown_cells_vis_array", 1, true);
         m_markerPubMerged = nh_.advertise<visualization_msgs::MarkerArray>("merged_cells_vis_array", 1, true);
+
+        // ROS services
+        m_octomapBinaryService = nh_.advertiseService("octomap_binary", &OctomapFilter::octomapBinarySrv, this);
 
         //
         // read ROS param
@@ -169,7 +192,7 @@ public:
     ~OctomapFilter() {
     }
 
-    void publishAll(const ros::Time& rostime, const std::string& frame_id) {
+    void publishAll(const ros::Time& rostime) {
         m_color.r = 0;
         m_color.g = 1;
         m_color.b = 0;
@@ -199,7 +222,7 @@ public:
             }
             tf::StampedTransform tf_W_L;
             try {
-                tf_listener_.lookupTransform(frame_id, plink->name, rostime, tf_W_L);
+                tf_listener_.lookupTransform(m_worldFrameId, plink->name, rostime, tf_W_L);
             } catch(tf::TransformException& ex){
                 ROS_ERROR_STREAM( "Transform error of sensor data: " << ex.what() << ", quitting callback");
                 continue;
@@ -253,6 +276,8 @@ public:
 
         m_octree->prune();
 
+        m_octree_merged = m_octree;
+
         //
         // visualize unknown
         //
@@ -287,7 +312,7 @@ public:
             for (unsigned i= 0; i < occupiedNodesVis.markers.size(); ++i){
                 double size = m_unknowntree->getNodeSize(i);
 
-                occupiedNodesVis.markers[i].header.frame_id = frame_id;
+                occupiedNodesVis.markers[i].header.frame_id = m_worldFrameId;
                 occupiedNodesVis.markers[i].header.stamp = rostime;
                 occupiedNodesVis.markers[i].ns = "map";
                 occupiedNodesVis.markers[i].id = i;
@@ -317,10 +342,10 @@ public:
             occupiedNodesVisMerged.markers.resize(m_treeDepth+1);
 
             // now, traverse all leafs in the tree:
-            for (octomap::OcTree::iterator it = m_octree->begin(m_maxTreeDepth),
-                end = m_octree->end(); it != end; ++it)
+            for (octomap::OcTree::iterator it = m_octree_merged->begin(m_maxTreeDepth),
+                end = m_octree_merged->end(); it != end; ++it)
             {
-                if (m_octree->isNodeOccupied(*it)){
+                if (m_octree_merged->isNodeOccupied(*it)){
                     double z = it.getZ();
                     double size = it.getSize();
                     double x = it.getX();
@@ -339,9 +364,9 @@ public:
             }
 
             for (unsigned i= 0; i < occupiedNodesVisMerged.markers.size(); ++i){
-                double size = m_octree->getNodeSize(i);
+                double size = m_octree_merged->getNodeSize(i);
 
-                occupiedNodesVisMerged.markers[i].header.frame_id = frame_id;
+                occupiedNodesVisMerged.markers[i].header.frame_id = m_worldFrameId;
                 occupiedNodesVisMerged.markers[i].header.stamp = rostime;
                 occupiedNodesVisMerged.markers[i].ns = "map";
                 occupiedNodesVisMerged.markers[i].id = i;
@@ -362,15 +387,15 @@ public:
         }
 
         Octomap map;
-        map.header.frame_id = frame_id;
+        map.header.frame_id = m_worldFrameId;
         map.header.stamp = rostime;
-        if (octomap_msgs::binaryMapToMsg(*boost::dynamic_pointer_cast<octomap::OcTree >(m_octree), map))
+        if (octomap_msgs::binaryMapToMsg(*boost::dynamic_pointer_cast<octomap::OcTree >(m_octree_merged), map))
             m_binaryMapPub.publish(map);
         else
             ROS_ERROR("Error serializing OctoMap");
 
         Octomap map2;
-        map2.header.frame_id = frame_id;
+        map2.header.frame_id = m_worldFrameId;
         map2.header.stamp = rostime;
         if (octomap_msgs::binaryMapToMsg(*boost::dynamic_pointer_cast<octomap::OcTree >(m_unknowntree), map2))
             m_binaryUnknownMapPub.publish(map2);
