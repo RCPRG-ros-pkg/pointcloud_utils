@@ -70,7 +70,7 @@
 
 #include "pointcloud_utils_msgs/FindPlanes.h"
 
-//#include "planer_utils/marker_publisher.h"
+#include "rcprg_ros_utils/marker_publisher.h"
 
 class FindFeaturesPC {
 public:
@@ -87,7 +87,7 @@ public:
     ros::Time pc_stamp_;
     std::string pc_frame_id_;
 
-//    MarkerPublisher mp_;
+    MarkerPublisher mp_;
 
 public:
 
@@ -102,7 +102,7 @@ public:
 
     FindFeaturesPC(ros::NodeHandle &n) :
         nh_(n),
-//        mp_(n),
+        mp_(n),
         point_cloud_processed_(true),
         tolerance_(0.04),
         pc_(new PclPointCloud)
@@ -264,7 +264,7 @@ bool findPlanes(pointcloud_utils_msgs::FindPlanes::Request  &req,
 //        int ptidx = rand()%size;
     for (int i = 0; i < size; i+=2) {
         int ptidx = i;
-//        m_id = pcf->mp_.addSinglePointMarker(m_id, KDL::Vector(cloud_p->points[ptidx].x, cloud_p->points[ptidx].y, cloud_p->points[ptidx].z), c_r, c_g, c_b, 1, 0.01, pcf->pc_frame_id_);
+        m_id = pcf->mp_.addSinglePointMarker(m_id, KDL::Vector(cloud_p->points[ptidx].x, cloud_p->points[ptidx].y, cloud_p->points[ptidx].z), c_r, c_g, c_b, 1, 0.01, pcf->pc_frame_id_);
     }
 
 //    std::stringstream ss;
@@ -278,7 +278,7 @@ bool findPlanes(pointcloud_utils_msgs::FindPlanes::Request  &req,
     i++;
   }
 
-//pcf->mp_.publish();
+pcf->mp_.publish();
 
 
 
