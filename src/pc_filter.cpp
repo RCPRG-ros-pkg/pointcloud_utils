@@ -102,6 +102,7 @@ public:
         }
 
         if (point_cloud_processed_) {
+            point_cloud_processed_ = false;
             sensor_msgs::PointCloud2 resized;
             resized.header = cloud->header;
             resized.height = cloud->height/2;
@@ -142,7 +143,6 @@ public:
             pc_frame_id_ = cloud->header.frame_id;
             width_ = resized.width;
             height_ = resized.height;
-            point_cloud_processed_ = false;
         }
     }
 
@@ -193,7 +193,6 @@ public:
         while (ros::ok()) {
             ros::spinOnce();
             loop_rate.sleep();
-
             if (errors > 5) {
                 point_cloud_processed_ = true;
             }
@@ -251,7 +250,8 @@ public:
                                 KDL::Vector r_e(pc_.points[pidx].x, pc_.points[pidx].y, pc_.points[pidx].z);
                                 KDL::Vector r_s = r_e;
                                 r_s.Normalize();
-                                r_s = r_s * 0.04;
+                                r_s = r_s * 0.06;
+                                r_e = r_e + r_s;
                                 if (col_model->checkRayCollision((*it)->geometry.get(), T_C_COL, r_s, r_e)) {
                                     pt_col[pidx] = true;
                                 }
@@ -297,7 +297,8 @@ public:
                                     KDL::Vector r_e(pc_.points[pidx].x, pc_.points[pidx].y, pc_.points[pidx].z);
                                     KDL::Vector r_s = r_e;
                                     r_s.Normalize();
-                                    r_s = r_s * 0.04;
+                                    r_s = r_s * 0.06;
+                                    r_e = r_e + r_s;
                                     if (col_model->checkRayCollision((*it)->geometry.get(), T_C_COL, r_s, r_e)) {
                                         pt_col[pidx] = true;
                                     }
