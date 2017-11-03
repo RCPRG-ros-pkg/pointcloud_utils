@@ -60,6 +60,8 @@
 
 #include <collision_convex_model/collision_convex_model.h>
 
+#include <pointcloud_utils_msgs/AttachObject.h>
+
 class BoundingSphere {
 public:
     double radius_;
@@ -75,6 +77,7 @@ class PCFilter {
     message_filters::Subscriber<sensor_msgs::PointCloud2>* m_pointCloudSub;
     tf::MessageFilter<sensor_msgs::PointCloud2>* m_tfPointCloudSub;
     ros::Publisher pub_pc_;
+    ros::ServiceServer ss_attach_object_;
 
     typedef pcl::PointCloud<pcl::PointXYZRGB> PclPointCloud;
     PclPointCloud pc_;
@@ -90,6 +93,7 @@ class PCFilter {
     int width_;
     int height_;
 
+    std::vector<moveit_msgs::AttachedCollisionObject > attached_;
 public:
 
     void insertCloudCallback(const sensor_msgs::PointCloud2::ConstPtr& cloud){
@@ -166,9 +170,18 @@ public:
 
         // TODO: read FOV from ROS param
         private_nh.param("horizontal_fov", horizontal_fov_, horizontal_fov_);
+
+        ss_attach_object_ = nh_.advertiseService("attach_object", &PCFilter::attachObject, this);
     }
 
     ~PCFilter() {
+    }
+
+    bool attachObject(pointcloud_utils_msgs::AttachObject::Request  &req,
+                      pointcloud_utils_msgs::AttachObject::Response &res)
+    {
+        attached_ = req.obj;
+        return true;
     }
 
     void spin() {
@@ -201,7 +214,9 @@ public:
 
                 std::vector<bool > pt_col(pc_.points.size(), false);
                 bool tf_error = false;
-                for (double t = -0.2; t <= 0.2; t += 0.02) {
+                //for (double t = -0.2; t <= 0.2; t += 0.02) {
+                double t=0.0;
+                {
                     tf::StampedTransform tf_W_C;
                     try {
                         tf_listener_.lookupTransform("world", pc_frame_id_, ros::Time(pc_stamp_.toSec()+t), tf_W_C);
@@ -215,6 +230,8 @@ public:
                     tf::transformStampedTFToMsg(tf_W_C, tfm_W_C);
                     tf::transformMsgToKDL(tfm_W_C.transform, T_W_C);
 
+//TODO; add support for attached objects
+//attached_
                     for (int l_idx = 0; l_idx < col_model->getLinksCount(); l_idx++) {
                         const boost::shared_ptr< self_collision::Link > plink = col_model->getLink(l_idx);
                         if (plink->collision_array.size() == 0) {
@@ -239,7 +256,7 @@ public:
                             KDL::Frame T_C_COL = T_C_L * (*it)->origin;
                             KDL::Vector bs_C = T_C_COL * KDL::Vector();
                             double dist_C = bs_C.Norm();
-                            double radius = (*it)->geometry->getBroadphaseRadius();
+                            double radius = (*it)->geometry->getBroadphaseRadius()+0.04;
                             if (dist_C < 0.01 || dist_C < radius) {
                                 // the origin of the bounding sphere is near camera origin,
                                 // or the origin of camera is inside bounding sphere
@@ -313,7 +330,7 @@ public:
                     }
 
                     if (tf_error) {
-                        break;
+                        //break;
                     }
                 }
 
