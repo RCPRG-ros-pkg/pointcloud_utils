@@ -199,98 +199,52 @@ public:
 
             if (!point_cloud_processed_) {
 
-                tf::StampedTransform tf_W_C;
-                try {
-                    tf_listener_.lookupTransform("world", pc_frame_id_, pc_stamp_, tf_W_C);
-                } catch(tf::TransformException& ex){
-                    ROS_ERROR_STREAM( "Transform error of sensor data: " << ex.what() << ", quitting callback");
-                    errors++;
-                    continue;
-                }
-                geometry_msgs::TransformStamped tfm_W_C;
-                KDL::Frame T_W_C;
-                tf::transformStampedTFToMsg(tf_W_C, tfm_W_C);
-                tf::transformMsgToKDL(tfm_W_C.transform, T_W_C);
-
                 std::vector<bool > pt_col(pc_.points.size(), false);
                 bool tf_error = false;
-                for (int l_idx = 0; l_idx < col_model->getLinksCount(); l_idx++) {
-                    const boost::shared_ptr< self_collision::Link > plink = col_model->getLink(l_idx);
-                    if (plink->collision_array.size() == 0) {
-                        continue;
-                    }
-                    tf::StampedTransform tf_W_L;
+                for (double t = -0.2; t <= 0.2; t += 0.02) {
+                    tf::StampedTransform tf_W_C;
                     try {
-                        tf_listener_.lookupTransform("world", plink->name, pc_stamp_, tf_W_L);
+                        tf_listener_.lookupTransform("world", pc_frame_id_, ros::Time(pc_stamp_.toSec()+t), tf_W_C);
                     } catch(tf::TransformException& ex){
                         ROS_ERROR_STREAM( "Transform error of sensor data: " << ex.what() << ", quitting callback");
-                        tf_error = true;
-                        break;
+                        errors++;
+                        continue;
                     }
-                    geometry_msgs::TransformStamped tfm_W_L;
-                    KDL::Frame T_W_L;
-                    tf::transformStampedTFToMsg(tf_W_L, tfm_W_L);
-                    tf::transformMsgToKDL(tfm_W_L.transform, T_W_L);
-                    KDL::Frame T_C_L = T_W_C.Inverse() * T_W_L;
-                    links_tf[l_idx] = T_W_L;
+                    geometry_msgs::TransformStamped tfm_W_C;
+                    KDL::Frame T_W_C;
+                    tf::transformStampedTFToMsg(tf_W_C, tfm_W_C);
+                    tf::transformMsgToKDL(tfm_W_C.transform, T_W_C);
 
-                    for (self_collision::Link::VecPtrCollision::const_iterator it=plink->collision_array.begin(), end=plink->collision_array.end(); it != end; ++it) {
-                        KDL::Frame T_C_COL = T_C_L * (*it)->origin;
-                        KDL::Vector bs_C = T_C_COL * KDL::Vector();
-                        double dist_C = bs_C.Norm();
-                        double radius = (*it)->geometry->getBroadphaseRadius();
-                        if (dist_C < 0.01 || dist_C < radius) {
-                            // the origin of the bounding sphere is near camera origin,
-                            // or the origin of camera is inside bounding sphere
-                            // perform check for all rays
-                            for (int pidx = 0; pidx < pc_.points.size(); pidx++) {
-                                if (pt_col[pidx]) {
-                                    continue;
-                                }
-                                KDL::Vector r_e(pc_.points[pidx].x, pc_.points[pidx].y, pc_.points[pidx].z);
-                                KDL::Vector r_s = r_e;
-                                r_s.Normalize();
-                                r_s = r_s * 0.06;
-                                r_e = r_e + r_s;
-                                if (col_model->checkRayCollision((*it)->geometry.get(), T_C_COL, r_s, r_e)) {
-                                    pt_col[pidx] = true;
-                                }
-                            }
-                            //std::cout << "full check for link: " << plink->name << std::endl;
+                    for (int l_idx = 0; l_idx < col_model->getLinksCount(); l_idx++) {
+                        const boost::shared_ptr< self_collision::Link > plink = col_model->getLink(l_idx);
+                        if (plink->collision_array.size() == 0) {
+                            continue;
                         }
-                        else {
-                            // get the angular size of the bounding sphere
-                            double angle_R = asin(radius/dist_C);
-                            // get angle of sphere origin (camera z axis is treated as x axis for atan2)
-                            // 1. the xz plane
-                            double angle_C_x = atan2(bs_C.x(), bs_C.z());
-                            if (fabs(angle_C_x) > horizontal_fov_/2 + PI/2) {
-                                // the bounding sphere is surely outside the frustrum
-                                continue;
-                            }
-                            // determine the horizontal range
-                            int x_min = ((angle_C_x-angle_R)+horizontal_fov_/2)/horizontal_fov_*width_;
-                            int x_max = ((angle_C_x+angle_R)+horizontal_fov_/2)/horizontal_fov_*width_;
-                            x_min = std::max(std::min(x_min, width_), 0);
-                            x_max = std::max(std::min(x_max, width_), 0);
+                        tf::StampedTransform tf_W_L;
+                        try {
+                            tf_listener_.lookupTransform("world", plink->name, ros::Time(pc_stamp_.toSec()+t), tf_W_L);
+                        } catch(tf::TransformException& ex){
+                            ROS_ERROR_STREAM( "Transform error of sensor data: " << ex.what() << ", quitting callback");
+                            tf_error = true;
+                            break;
+                        }
+                        geometry_msgs::TransformStamped tfm_W_L;
+                        KDL::Frame T_W_L;
+                        tf::transformStampedTFToMsg(tf_W_L, tfm_W_L);
+                        tf::transformMsgToKDL(tfm_W_L.transform, T_W_L);
+                        KDL::Frame T_C_L = T_W_C.Inverse() * T_W_L;
+                        links_tf[l_idx] = T_W_L;
 
-                            // 2. the yz plane
-                            double angle_C_y = atan2(bs_C.y(), bs_C.z());
-                            if (fabs(angle_C_y) > vertical_fov_/2 + PI/2) {
-                                // the bounding sphere is surely outside the frustrum
-                                continue;
-                            }
-                            // determine the vertical range
-                            int y_min = ((angle_C_y-angle_R)+vertical_fov_/2)/vertical_fov_*height_;
-                            int y_max = ((angle_C_y+angle_R)+vertical_fov_/2)/vertical_fov_*height_;
-                            y_min = std::max(std::min(y_min, height_), 0);
-                            y_max = std::max(std::min(y_max, height_), 0);
-
-                            //bool partial_check = false;
-                            for (int y = y_min; y < y_max; ++y) {
-                                for (int x = x_min; x < x_max; ++x) {
-                                    //partial_check = true;
-                                    int pidx = y * width_ + x;
+                        for (self_collision::Link::VecPtrCollision::const_iterator it=plink->collision_array.begin(), end=plink->collision_array.end(); it != end; ++it) {
+                            KDL::Frame T_C_COL = T_C_L * (*it)->origin;
+                            KDL::Vector bs_C = T_C_COL * KDL::Vector();
+                            double dist_C = bs_C.Norm();
+                            double radius = (*it)->geometry->getBroadphaseRadius();
+                            if (dist_C < 0.01 || dist_C < radius) {
+                                // the origin of the bounding sphere is near camera origin,
+                                // or the origin of camera is inside bounding sphere
+                                // perform check for all rays
+                                for (int pidx = 0; pidx < pc_.points.size(); pidx++) {
                                     if (pt_col[pidx]) {
                                         continue;
                                     }
@@ -303,13 +257,66 @@ public:
                                         pt_col[pidx] = true;
                                     }
                                 }
+                                //std::cout << "full check for link: " << plink->name << std::endl;
                             }
-                            //if (partial_check) {
-                            //    std::cout << "partial check for link: " << plink->name << std::endl;
-                            //}
+                            else {
+                                // get the angular size of the bounding sphere
+                                double angle_R = asin(radius/dist_C);
+                                // get angle of sphere origin (camera z axis is treated as x axis for atan2)
+                                // 1. the xz plane
+                                double angle_C_x = atan2(bs_C.x(), bs_C.z());
+                                if (fabs(angle_C_x) > horizontal_fov_/2 + PI/2) {
+                                    // the bounding sphere is surely outside the frustrum
+                                    continue;
+                                }
+                                // determine the horizontal range
+                                int x_min = ((angle_C_x-angle_R)+horizontal_fov_/2)/horizontal_fov_*width_;
+                                int x_max = ((angle_C_x+angle_R)+horizontal_fov_/2)/horizontal_fov_*width_;
+                                x_min = std::max(std::min(x_min, width_), 0);
+                                x_max = std::max(std::min(x_max, width_), 0);
+
+                                // 2. the yz plane
+                                double angle_C_y = atan2(bs_C.y(), bs_C.z());
+                                if (fabs(angle_C_y) > vertical_fov_/2 + PI/2) {
+                                    // the bounding sphere is surely outside the frustrum
+                                    continue;
+                                }
+                                // determine the vertical range
+                                int y_min = ((angle_C_y-angle_R)+vertical_fov_/2)/vertical_fov_*height_;
+                                int y_max = ((angle_C_y+angle_R)+vertical_fov_/2)/vertical_fov_*height_;
+                                y_min = std::max(std::min(y_min, height_), 0);
+                                y_max = std::max(std::min(y_max, height_), 0);
+
+                                //bool partial_check = false;
+                                for (int y = y_min; y < y_max; ++y) {
+                                    for (int x = x_min; x < x_max; ++x) {
+                                        //partial_check = true;
+                                        int pidx = y * width_ + x;
+                                        if (pt_col[pidx]) {
+                                            continue;
+                                        }
+                                        KDL::Vector r_e(pc_.points[pidx].x, pc_.points[pidx].y, pc_.points[pidx].z);
+                                        KDL::Vector r_s = r_e;
+                                        r_s.Normalize();
+                                        r_s = r_s * 0.06;
+                                        r_e = r_e + r_s;
+                                        if (col_model->checkRayCollision((*it)->geometry.get(), T_C_COL, r_s, r_e)) {
+                                            pt_col[pidx] = true;
+                                        }
+                                    }
+                                }
+                                //if (partial_check) {
+                                //    std::cout << "partial check for link: " << plink->name << std::endl;
+                                //}
+                            }
                         }
                     }
+
+                    if (tf_error) {
+                        break;
+                    }
                 }
+
                 if (tf_error) {
                     errors++;
                     continue;
