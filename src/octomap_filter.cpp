@@ -40,6 +40,7 @@
 #include <tf/message_filter.h>
 #include <message_filters/subscriber.h>
 #include <sensor_msgs/PointCloud2.h>
+#include <std_msgs/Int32.h>
 
 #include <string>
 #include <stdlib.h>
@@ -85,6 +86,7 @@ class OctomapFilter {
     ros::Subscriber m_fullMapSub;
     ros::Publisher  m_binaryMapPub;
     ros::Publisher  m_binaryUnknownMapPub, m_markerPub, m_markerPubMerged;
+    ros::Publisher  m_unknownCollisions, m_unknownDiscovered;
 
     ros::ServiceServer m_octomapBinaryService;
 
@@ -105,6 +107,9 @@ class OctomapFilter {
     double zmax_;
     bool visualize_unknown_;
     bool visualize_merged_;
+
+    int unknown_collisions_;
+    int unknown_discovered_;
 
 public:
 
@@ -138,6 +143,8 @@ public:
         , zmax_(1.5)
         , visualize_unknown_(false)
         , visualize_merged_(false)
+        , unknown_collisions_(0)
+        , unknown_discovered_(0)
     {
         ros::NodeHandle private_nh("~");
 
@@ -147,6 +154,8 @@ public:
         m_binaryMapPub = nh_.advertise<Octomap>("octomap_merged_binary", 1, true);
         m_markerPub = nh_.advertise<visualization_msgs::MarkerArray>("unknown_cells_vis_array", 1, true);
         m_markerPubMerged = nh_.advertise<visualization_msgs::MarkerArray>("merged_cells_vis_array", 1, true);
+        m_unknownCollisions = private_nh.advertise<std_msgs::Int32>("unknown_cells_collisions", 1, true);
+        m_unknownDiscovered = private_nh.advertise<std_msgs::Int32>("unknown_cells_discovered", 1, true);
 
         // ROS services
         m_octomapBinaryService = nh_.advertiseService("octomap_binary", &OctomapFilter::octomapBinarySrv, this);
@@ -201,6 +210,16 @@ public:
         int m_treeDepth = m_octree->getTreeDepth();
         int m_maxTreeDepth = m_treeDepth;
 
+        int vol1 = 0;
+        for (octomap::OcTree::iterator it = m_unknowntree->begin_leafs(),
+            end = m_unknowntree->end_leafs(); it != end; ++it)
+        {
+            if (m_unknowntree->isNodeOccupied(*it)) {
+                int size = std::round(it.getSize()/m_unknowntree->getResolution());
+                vol1 += size * size * size;
+            }
+        }
+
         for (int i = key_min_[0]; i < key_max_[0]; ++i) {
             for (int j = key_min_[1]; j < key_max_[1]; ++j) {
                 for (int k = key_min_[2]; k < key_max_[2]; ++k) {
@@ -214,6 +233,17 @@ public:
         }
 
         m_unknowntree->updateInnerOccupancy();
+
+        int vol2 = 0;
+        for (octomap::OcTree::iterator it = m_unknowntree->begin_leafs(),
+            end = m_unknowntree->end_leafs(); it != end; ++it)
+        {
+            if (m_unknowntree->isNodeOccupied(*it)) {
+                int size = std::round(it.getSize()/m_unknowntree->getResolution());
+                vol2 += size * size * size;
+            }
+        }
+        unknown_discovered_ += vol1 - vol2;
 
         for (int l_idx = 0; l_idx < col_model_->getLinksCount(); l_idx++) {
             const boost::shared_ptr< self_collision::Link > plink = col_model_->getLink(l_idx);
@@ -233,11 +263,17 @@ public:
             tf::transformMsgToKDL(tfm_W_L.transform, T_W_L);
 
             for (self_collision::Link::VecPtrCollision::const_iterator it=plink->collision_array.begin(), end=plink->collision_array.end(); it != end; ++it) {
-                self_collision::removeNodesFromOctomap(m_unknowntree, (*it)->geometry.get(), T_W_L * (*it)->origin);
+                unknown_collisions_ += self_collision::removeNodesFromOctomap(m_unknowntree, (*it)->geometry.get(), T_W_L * (*it)->origin);
             }
         }
 
-//        m_unknowntree->updateInnerOccupancy();
+        std_msgs::Int32 unknownCollisions;
+        unknownCollisions.data = unknown_collisions_;
+        m_unknownCollisions.publish(unknownCollisions);
+
+        std_msgs::Int32 unknownDiscovered;
+        unknownDiscovered.data = unknown_discovered_;
+        m_unknownDiscovered.publish(unknownDiscovered);
 
         // fix for a bug near origin: collision between velma torso and octomap
         self_collision::Sphere sp(0.3);
@@ -360,6 +396,12 @@ public:
                     cubeCenter.z = z;
 
                     occupiedNodesVisMerged.markers[idx].points.push_back(cubeCenter);
+
+                    double minX, minY, minZ, maxX, maxY, maxZ;
+                    m_octree_merged->getMetricMin(minX, minY, minZ);
+                    m_octree_merged->getMetricMax(maxX, maxY, maxZ);
+                    double h = (1.0 - std::min(std::max((cubeCenter.z-minZ)/ (maxZ - minZ), 0.0), 1.0)) * 0.8;
+                    occupiedNodesVisMerged.markers[idx].colors.push_back(heightMapColor(h));
                 }
             }
 
@@ -406,6 +448,56 @@ public:
     void spin() {
         ros::spin();
     }
+
+    std_msgs::ColorRGBA heightMapColor(double h) {
+
+      std_msgs::ColorRGBA color;
+      color.a = 1.0;
+      // blend over HSV-values (more colors)
+
+      double s = 1.0;
+      double v = 1.0;
+
+      h -= floor(h);
+      h *= 6;
+      int i;
+      double m, n, f;
+
+      i = floor(h);
+      f = h - i;
+      if (!(i & 1))
+        f = 1 - f; // if i is even
+      m = v * (1 - s);
+      n = v * (1 - s * f);
+
+      switch (i) {
+        case 6:
+        case 0:
+          color.r = v; color.g = n; color.b = m;
+          break;
+        case 1:
+          color.r = n; color.g = v; color.b = m;
+          break;
+        case 2:
+          color.r = m; color.g = v; color.b = n;
+          break;
+        case 3:
+          color.r = m; color.g = n; color.b = v;
+          break;
+        case 4:
+          color.r = n; color.g = m; color.b = v;
+          break;
+        case 5:
+          color.r = v; color.g = m; color.b = n;
+          break;
+        default:
+          color.r = 1; color.g = 0.5; color.b = 0.5;
+          break;
+      }
+
+      return color;
+    }
+
 };
 
 int main(int argc, char** argv) {
