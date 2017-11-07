@@ -45,7 +45,7 @@ target_link_libraries(sim_visible_pointcloud ${catkin_LIBRARIES}
 target_link_libraries(test_nn ${catkin_LIBRARIES})
 target_link_libraries(octomap_filter ${catkin_LIBRARIES} ${OCTOMAP_LIBRARIES})
 
-install(TARGETS find_features_pc pc_filter sim_visible_pointcloud test_nn
+install(TARGETS find_features_pc pc_filter octomap_filter sim_visible_pointcloud test_nn
   ARCHIVE DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
   LIBRARY DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
   RUNTIME DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
