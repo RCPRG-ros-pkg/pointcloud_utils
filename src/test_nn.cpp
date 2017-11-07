@@ -212,7 +212,7 @@ public:
         const KDL::Frame &T_B_H = kin_model_->getFrame(camera_frame_id_);
         KDL::Frame T_H_B = T_B_H.Inverse();
 
-        // frustrum boundaries
+        // frustum boundaries
         double rx, ry, rz;
         rz = 1.0;
         rx = tan(fov_x_) * rz;
@@ -286,7 +286,7 @@ public:
                         }
                         n.Normalize();
 
-                        // the whole face is outside frustrum
+                        // the whole face is outside frustum
                         if ((KDL::dot(vec_v[i1], n1) > 0 && KDL::dot(vec_v[i2], n1) > 0 && KDL::dot(vec_v[i3], n1) > 0) ||
                                 (KDL::dot(vec_v[i1], n2) > 0 && KDL::dot(vec_v[i2], n2) > 0 && KDL::dot(vec_v[i3], n2) > 0) ||
                                 (KDL::dot(vec_v[i1], n3) > 0 && KDL::dot(vec_v[i2], n3) > 0 && KDL::dot(vec_v[i3], n3) > 0) ||

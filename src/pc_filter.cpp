@@ -252,7 +252,7 @@ public:
             // 1. the xz plane
             double angle_C_x = atan2(bs_C.x(), bs_C.z());
             if (fabs(angle_C_x) > horizontal_fov_/2 + PI/2) {
-                // the bounding sphere is surely outside the frustrum
+                // the bounding sphere is surely outside the frustum
                 return;
             }
             // determine the horizontal range
@@ -264,7 +264,7 @@ public:
             // 2. the yz plane
             double angle_C_y = atan2(bs_C.y(), bs_C.z());
             if (fabs(angle_C_y) > vertical_fov_/2 + PI/2) {
-                // the bounding sphere is surely outside the frustrum
+                // the bounding sphere is surely outside the frustum
                 return;
             }
             // determine the vertical range
