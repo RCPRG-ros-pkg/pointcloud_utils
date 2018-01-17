@@ -129,6 +129,7 @@ public:
                     float py = *((float*)(ptr)+1);
                     float pz = *((float*)(ptr)+2);
 
+                    // the point has some NaN coordinates, so there was no hit
                     if (px != px || py != py || pz!= pz) {
                         px = (float(x)/float(cloud->width)*2.0-1.0)*dx*2.5;
                         py = (float(y)/float(cloud->height)*2.0-1.0)*dy*2.5;
