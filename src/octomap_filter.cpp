@@ -66,7 +66,6 @@
 #include <octomap_msgs/BoundingBoxQuery.h>
 #include <octomap_msgs/conversions.h>
 
-#include <octomap_ros/conversions.h>
 #include <octomap/octomap.h>
 #include <octomap/OcTreeKey.h>
 
