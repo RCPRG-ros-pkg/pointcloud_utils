@@ -43,7 +43,6 @@ include_directories(${catkin_INCLUDE_DIRS} ${Eigen3_INCLUDE_DIRS} ${USE_OROCOS_I
 add_executable(find_features_pc src/find_features_pc.cpp)
 add_executable(pc_filter src/pc_filter.cpp)
 add_executable(sim_visible_pointcloud src/sim_visible_pointcloud.cpp)
-add_executable(test_nn src/test_nn.cpp)
 add_executable(octomap_filter src/octomap_filter.cpp)
 
 target_link_libraries(find_features_pc ${catkin_LIBRARIES})
@@ -51,10 +50,9 @@ target_link_libraries(pc_filter ${catkin_LIBRARIES})
 target_link_libraries(sim_visible_pointcloud ${catkin_LIBRARIES}
   ${DART_LIBRARIES}
 )
-target_link_libraries(test_nn ${catkin_LIBRARIES})
 target_link_libraries(octomap_filter ${catkin_LIBRARIES} ${OCTOMAP_LIBRARIES})
 
-install(TARGETS find_features_pc pc_filter octomap_filter sim_visible_pointcloud test_nn
+install(TARGETS find_features_pc pc_filter octomap_filter sim_visible_pointcloud
   ARCHIVE DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
   LIBRARY DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
   RUNTIME DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
