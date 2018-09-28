@@ -37,7 +37,7 @@ set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++11")
 link_directories(${orocos_kdl_LIBRARY_DIRS})
 
 include_directories(${catkin_INCLUDE_DIRS} ${Eigen3_INCLUDE_DIRS} ${USE_OROCOS_INCLUDE_DIRS}
-  ${OCTOMAP_INCLUDE_DIRS}
+  ${OCTOMAP_INCLUDE_DIRS} ${DART_INCLUDE_DIRS}
 )
 
 add_executable(find_features_pc src/find_features_pc.cpp)
