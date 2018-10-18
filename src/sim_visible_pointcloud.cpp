@@ -60,7 +60,7 @@
 #include <pcl/features/normal_3d_omp.h>
 #include <pcl/features/shot_omp.h>
 #include <pcl/features/board.h>
-#include <pcl/keypoints/uniform_sampling.h>
+#include <pcl/filters/uniform_sampling.h>
 #include <pcl/recognition/cg/hough_3d.h>
 #include <pcl/recognition/cg/geometric_consistency.h>
 #include <pcl/features/principal_curvatures.h>
@@ -70,7 +70,7 @@
 #include <collision_convex_model/collision_convex_model.h>
 #include <kin_dyn_model/kin_model.h>
 
-#include <dart/dynamics/MeshShape.h>
+#include <dart/dynamics/MeshShape.hpp>
 
 #include <pointcloud_utils_msgs/SimVisiblePointCloud.h>
 #include <pointcloud_utils_msgs/FindPointCloudCorrespondence.h>
