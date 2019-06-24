@@ -25,7 +25,7 @@ find_package(catkin REQUIRED COMPONENTS
 find_package(OCTOMAP REQUIRED)
 find_package(Eigen3 REQUIRED)
 find_package(orocos_kdl REQUIRED)
-find_package(DART REQUIRED)
+#find_package(DART REQUIRED)
 
 catkin_package(
     CATKIN_DEPENDS collision_convex_model
@@ -37,26 +37,26 @@ set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++11")
 link_directories(${orocos_kdl_LIBRARY_DIRS})
 
 include_directories(${catkin_INCLUDE_DIRS} ${Eigen3_INCLUDE_DIRS} ${USE_OROCOS_INCLUDE_DIRS}
-  ${OCTOMAP_INCLUDE_DIRS} ${DART_INCLUDE_DIRS}
+  ${OCTOMAP_INCLUDE_DIRS}
 )
+#${DART_INCLUDE_DIRS}
 
 add_executable(find_features_pc src/find_features_pc.cpp)
 add_executable(pc_filter src/pc_filter.cpp)
-add_executable(sim_visible_pointcloud src/sim_visible_pointcloud.cpp)
+#add_executable(sim_visible_pointcloud src/sim_visible_pointcloud.cpp)
 add_executable(octomap_filter src/octomap_filter.cpp)
 
 target_link_libraries(find_features_pc ${catkin_LIBRARIES})
 target_link_libraries(pc_filter ${catkin_LIBRARIES})
-target_link_libraries(sim_visible_pointcloud ${catkin_LIBRARIES}
-  ${DART_LIBRARIES}
-)
+#target_link_libraries(sim_visible_pointcloud ${catkin_LIBRARIES} ${DART_LIBRARIES})
 target_link_libraries(octomap_filter ${catkin_LIBRARIES} ${OCTOMAP_LIBRARIES})
 
-install(TARGETS find_features_pc pc_filter octomap_filter sim_visible_pointcloud
+install(TARGETS find_features_pc pc_filter octomap_filter
   ARCHIVE DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
   LIBRARY DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
   RUNTIME DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 )
+#sim_visible_pointcloud
 
 install(DIRECTORY launch/
   DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION}/launch
