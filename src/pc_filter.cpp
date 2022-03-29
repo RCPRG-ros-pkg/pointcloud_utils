@@ -83,6 +83,7 @@ class PCFilter {
     PclPointCloud pc_;
     ros::Time pc_stamp_;
     std::string pc_frame_id_;
+    std::vector<std::string > ignored_links_;
 
     // ROS params
     double horizontal_fov_;
@@ -173,6 +174,7 @@ public:
 
         // TODO: read FOV from ROS param
         private_nh.param("horizontal_fov", horizontal_fov_, horizontal_fov_);
+        private_nh.param("ignored_links", ignored_links_, ignored_links_);
 
         ss_attach_object_ = private_nh.advertiseService("attach_object", &PCFilter::attachObject, this);
     }
@@ -298,6 +300,15 @@ public:
         }
     }
 
+    bool isLinkIgnored(const std::string& link_name) const {
+        for (int i = 0; i < ignored_links_.size(); ++i) {
+            if (link_name == ignored_links_[i]) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     void spin() {
 
         // read ROS param
@@ -351,6 +362,9 @@ public:
                             }
                         }
                         if (plink->collision_array.size() == 0 && !attached) {
+                            continue;
+                        }
+                        if (isLinkIgnored(plink->name)) {
                             continue;
                         }
                         tf::StampedTransform tf_W_L;
